@@ -1,0 +1,1627 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[DWP] Pod Readiness Benchmark</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fb; color: #1a1a2e; font-size: 13px; }
+
+        /* -- Header ------------------------------------------- */
+        header {
+            background: linear-gradient(135deg, #4a6cf7 0%, #7c3aed 100%);
+            padding: 36px 40px 32px;
+            text-align: center;
+            color: #fff;
+        }
+        header .icon { font-size: 36px; margin-bottom: 8px; }
+        header h1   { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.3px; }
+        header .sub { font-size: 13px; opacity: 0.85; margin-bottom: 14px; }
+        header .meta {
+            display: inline-flex; flex-wrap: wrap; gap: 0;
+            background: rgba(255,255,255,0.15); border-radius: 6px;
+            padding: 6px 16px; font-size: 12px;
+        }
+        header .meta span { padding: 0 10px; border-right: 1px solid rgba(255,255,255,0.3); }
+        header .meta span:last-child { border-right: none; }
+        header .meta strong { font-weight: 600; }
+
+        /* -- Notice banner --------------------------------------- */
+        .notice {
+            margin: 20px 40px 0; padding: 12px 18px; border-radius: 8px;
+            background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a;
+            font-size: 12px; line-height: 1.6;
+        }
+        .notice strong { color: #1d4ed8; }
+
+        /* -- Summary cards ------------------------------------- */
+        .summary-grid {
+            display: flex; flex-wrap: wrap; gap: 20px;
+            padding: 28px 40px;
+            background: #fff;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid #4a6cf7;
+            border-radius: 8px;
+            padding: 18px 24px;
+            min-width: 150px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        }
+        .card.green  { border-left-color: #10b981; }
+        .card.red    { border-left-color: #ef4444; }
+        .card.yellow { border-left-color: #f59e0b; }
+        .card .label { font-size: 10px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+        .card .value { font-size: 26px; font-weight: 800; color: #4a6cf7; }
+        .card.green  .value { color: #10b981; }
+        .card.red    .value { color: #ef4444; }
+        .card.yellow .value { color: #f59e0b; }
+
+        /* -- Section titles ------------------------------------ */
+        .section-wrap { padding: 28px 40px 0; }
+        .section-title {
+            font-size: 16px; font-weight: 700; color: #1a1a2e;
+            margin-bottom: 4px; display: flex; align-items: center; gap: 8px;
+        }
+        .section-title::after {
+            content: ''; flex: 1; height: 2px;
+            background: linear-gradient(90deg, #4a6cf7 0%, transparent 100%);
+            margin-left: 12px; border-radius: 2px;
+        }
+        .section-sub { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+
+        /* -- Tables -------------------------------------------- */
+        .table-wrap { padding: 0 40px 36px; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
+        thead th {
+            background: #f8fafc; color: #4b5563;
+            font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+            text-align: left; padding: 11px 14px;
+            border-bottom: 2px solid #e2e8f0;
+            white-space: nowrap; position: sticky; top: 0;
+        }
+        tbody tr { border-bottom: 1px solid #f1f5f9; transition: background 0.1s; }
+        tbody tr:hover { background: #f0f4ff; }
+        tbody td { padding: 10px 14px; vertical-align: middle; }
+
+        .svc-name  { font-weight: 700; color: #1e293b; white-space: nowrap; }
+        .mono      { font-family: 'Consolas', monospace; }
+        .small     { font-size: 11px; color: #94a3b8; }
+
+        .status-success { color: #10b981; font-weight: 700; }
+        .status-failed  { color: #ef4444; font-weight: 700; }
+
+        .time-fast   { color: #10b981; font-weight: 700; }
+        .time-medium { color: #f59e0b; font-weight: 700; }
+        .time-slow   { color: #ef4444; font-weight: 700; }
+        .total-cell  { font-size: 13px; font-weight: 800; white-space: nowrap; }
+
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 12px;
+            font-size: 10px; font-weight: 700; margin-left: 6px; vertical-align: middle;
+        }
+        .badge.cached { background: #dbeafe; color: #1d4ed8; }
+        .badge.fresh  { background: #fef3c7; color: #92400e; }
+
+        /* -- Lifecycle stage table ----------------------------- */
+        .lifecycle-table thead th { background: #f8fafc; }
+        .lifecycle-table thead th.hdr-stage {
+            background: linear-gradient(135deg, #4a6cf7 0%, #7c3aed 100%);
+            color: #fff; text-align: center;
+            border-right: 1px solid rgba(255,255,255,0.2);
+        }
+        .lifecycle-table thead th.hdr-bar {
+            background: #f1f5f9; color: #94a3b8;
+            text-align: center; font-size: 10px;
+        }
+        .lifecycle-table thead .sub-hdr th {
+            background: #f8fafc; color: #6b7280;
+            font-size: 10px; font-weight: 600; padding: 5px 14px 9px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .lifecycle-table thead .sub-hdr th.hdr-stage {
+            background: rgba(74,108,247,0.08); color: #4a6cf7;
+        }
+
+        .stage-cell { text-align: right; white-space: nowrap; font-family: 'Consolas', monospace; font-size: 12px; }
+        .stage-zero { color: #cbd5e1; }
+        .stage-fast { color: #10b981; font-weight: 700; }
+        .stage-ok   { color: #374151; }
+        .stage-slow { color: #ef4444; font-weight: 700; }
+        .stage-unaccounted { color: #94a3b8; font-style: italic; }
+
+        .failed-row td { opacity: 0.4; }
+        .avg-row td { background: #f0f4ff; font-weight: 700; color: #4a6cf7; border-top: 2px solid #e2e8f0; }
+
+        /* bars */
+        .bar-wrap  { display: flex; align-items: center; gap: 6px; min-width: 80px; }
+        .bar       { height: 8px; border-radius: 3px; min-width: 2px; flex-shrink: 0; }
+        .bar-label { font-size: 10px; color: #94a3b8; white-space: nowrap; }
+        .bar-zero  { font-size: 10px; color: #cbd5e1; }
+        .c-sched { background: #4a6cf7; }
+        .c-img   { background: #f59e0b; }
+        .c-istio { background: #8b5cf6; }
+        .c-ccr   { background: #10b981; }
+        .c-cst   { background: #059669; }
+        .c-ready { background: #f87171; }
+        .c-unacct{ background: #cbd5e1; }
+
+        /* legend */
+        .legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 40px 18px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b7280; }
+        .legend-dot  { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+        /* -- Event toggle / panel ------------------------------ */
+        .evt-toggle {
+            margin-top: 4px; font-size: 10px; font-weight: 600;
+            background: #eef2ff; color: #4a6cf7; border: 1px solid #c7d2fe;
+            border-radius: 5px; padding: 3px 8px; cursor: pointer;
+        }
+        .evt-toggle:hover { background: #e0e7ff; }
+        .evt-none { font-size: 10px; color: #cbd5e1; }
+
+        .event-panel {
+            margin: 0 40px 18px; background: #0f172a; border-radius: 10px;
+            overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        }
+        .event-panel-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 18px; background: #1e293b; color: #e2e8f0; font-size: 12px;
+        }
+        .evt-close {
+            background: transparent; border: 1px solid #475569; color: #cbd5e1;
+            border-radius: 5px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+        }
+        .evt-close:hover { background: #334155; }
+        .event-table { width: 100%; border-collapse: collapse; box-shadow: none; border-radius: 0; }
+        .event-table thead th {
+            background: #1e293b; color: #94a3b8; position: static;
+            border-bottom: 1px solid #334155; font-size: 10px;
+        }
+        .event-table tbody tr { border-bottom: 1px solid #1e293b; }
+        .event-table tbody tr:hover { background: #1e293b; }
+        .event-table td { padding: 7px 14px; color: #cbd5e1; font-size: 11px; vertical-align: top; }
+        .event-table .evt-reason { font-weight: 700; white-space: nowrap; color: #93c5fd; }
+        .event-table .evt-message { color: #e2e8f0; }
+        .event-table tr.evt-warning .evt-reason { color: #fca5a5; }
+        .event-table tr.evt-warning .evt-message { color: #fecaca; }
+        .evt-count {
+            display: inline-block; margin-left: 4px; font-size: 9px;
+            background: #334155; color: #cbd5e1; border-radius: 8px; padding: 1px 6px;
+        }
+    </style>
+    <script>
+        function toggleEvents(id) {
+            var el = document.getElementById(id);
+            if (!el) { return; }
+            el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+            if (el.style.display === 'block') {
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+    </script>
+</head>
+<body>
+
+<header>
+    <div class="icon">&#x26A1;</div>
+    <h1>Pod Readiness Benchmark</h1>
+    <div class="sub">Measuring pod startup performance after delete &amp; recreate</div>
+    <div class="meta">
+        <span><strong>Cluster:</strong> DWP</span>
+        <span><strong>Namespace:</strong> dwp</span>
+        <span><strong>Pull Type:</strong> Cached</span>
+        <span><strong>Run:</strong> 2026-08-04 16:35:37</span>
+        <span><strong>Services:</strong> 13</span>
+    </div>
+</header>
+
+<div class="notice">
+    <strong>Note on run-to-run variance:</strong> readiness times for the same service can legitimately differ between runs.
+    Common causes include node-level image cache state, scheduler/node placement (a pod landing on a busy or newly-scaled
+    node takes longer), API server / etcd load when many events fire close together, and cluster autoscaler activity.
+    The <em>Unaccounted</em> column below captures any wall-clock time that isn't attributable to a specific event-based
+    stage (e.g. a Kubernetes event that was throttled, deduplicated, or garbage-collected before it could be read - the
+    API server only retains events for about an hour by default).
+</div>
+
+<div class="summary-grid">
+    <div class="card green">
+        <div class="label">Succeeded</div>
+        <div class="value">13</div>
+    </div>
+    <div class="card red">
+        <div class="label">Failed</div>
+        <div class="value">0</div>
+    </div>
+    <div class="card">
+        <div class="label">Avg Total Ready Time</div>
+        <div class="value">1m 9.6s</div>
+    </div>
+    <div class="card yellow">
+        <div class="label">Slowest</div>
+        <div class="value">3m 30s</div>
+    </div>
+    <div class="card green">
+        <div class="label">Fastest</div>
+        <div class="value">15s</div>
+    </div>
+</div>
+
+<!-- SECTION 1 - Lifecycle Stage Breakdown -->
+<div class="section-wrap">
+    <div class="section-title">&#x23F1; Pod Lifecycle Stage Breakdown</div>
+    <div class="section-sub">Time spent in each stage from pod creation to ready. <span style="color:#ef4444;font-weight:700">Red</span> = &gt;25% above average &nbsp;|&nbsp; <span style="color:#10b981;font-weight:700">Green</span> = &gt;25% below average. Click &#128269; on a service to inspect its raw Kubernetes events.</div>
+</div>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-dot c-sched"></div>Scheduling</div>
+    <div class="legend-item"><div class="legend-dot c-img"></div>Image Pull</div>
+    <div class="legend-item"><div class="legend-dot c-istio"></div>Istio Pull</div>
+    <div class="legend-item"><div class="legend-dot c-ccr"></div>Container Create</div>
+    <div class="legend-item"><div class="legend-dot c-cst"></div>Container Start</div>
+    <div class="legend-item"><div class="legend-dot c-ready"></div>Readiness</div>
+    <div class="legend-item"><div class="legend-dot c-unacct"></div>Unaccounted</div>
+</div>
+
+<div class="table-wrap">
+    <table class="lifecycle-table">
+        <thead>
+            <tr>
+                <th rowspan="2" style="vertical-align:bottom">Service</th>
+                <th class="hdr-stage" colspan="8">Stage Durations</th>
+                <th class="hdr-bar"   colspan="7">Proportion of Total Ready Time</th>
+            </tr>
+            <tr class="sub-hdr">
+                <th class="hdr-stage" style="text-align:right">1. Scheduling</th>
+                <th class="hdr-stage" style="text-align:right">2. Image Pull</th>
+                <th class="hdr-stage" style="text-align:right">3. Istio Pull</th>
+                <th class="hdr-stage" style="text-align:right">4. Ctr Create</th>
+                <th class="hdr-stage" style="text-align:right">5. Ctr Start</th>
+                <th class="hdr-stage" style="text-align:right">6. Readiness</th>
+                <th class="hdr-stage" style="text-align:right">7. Unaccounted</th>
+                <th class="hdr-stage" style="text-align:right;border-right:none">Total Ready Time</th>
+                <th class="hdr-bar">Scheduling</th>
+                <th class="hdr-bar">Image Pull</th>
+                <th class="hdr-bar">Istio Pull</th>
+                <th class="hdr-bar">Ctr Create</th>
+                <th class="hdr-bar">Ctr Start</th>
+                <th class="hdr-bar">Readiness</th>
+                <th class="hdr-bar">Unaccounted</th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td class="svc-name">microservice-edmcopyservice <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-1')">&#128269; 11 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-ok stage-cell">38s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">4s</td>
+            <td class="time-medium total-cell">42s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:90%"></div><span class="bar-label">38s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:10%"></div><span class="bar-label">4s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">dsisunitservice <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-2')">&#128269; 14 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-fast   stage-cell">2s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-slow stage-cell">1m 8s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">6s</td>
+            <td class="time-medium total-cell">1m 16s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:3%"></div><span class="bar-label">2s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:89%"></div><span class="bar-label">1m 8s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:8%"></div><span class="bar-label">6s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-bhacasegeneration <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-3')">&#128269; 21 events</button></td>
+            <td class="stage-slow stage-cell">1m 10s</td>
+            <td class="stage-slow   stage-cell">40s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-fast stage-cell">12s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">1s</td>
+            <td class="time-slow total-cell">2m 3s</td>
+            <td><div class="bar-wrap"><div class="bar c-sched" style="width:57%"></div><span class="bar-label">1m 10s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:33%"></div><span class="bar-label">40s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:10%"></div><span class="bar-label">12s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:1%"></div><span class="bar-label">1s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-geothermal-gradient <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-4')">&#128269; 11 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-fast   stage-cell">13s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-fast stage-cell">11s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">3s</td>
+            <td class="time-fast total-cell">27s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:48%"></div><span class="bar-label">13s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:41%"></div><span class="bar-label">11s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:11%"></div><span class="bar-label">3s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-keda-custom-scaler <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-5')">&#128269; 5 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-fast   stage-cell">2s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-fast stage-cell">12s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">1s</td>
+            <td class="time-fast total-cell">15s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:13%"></div><span class="bar-label">2s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:80%"></div><span class="bar-label">12s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:7%"></div><span class="bar-label">1s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-content <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-6')">&#128269; 11 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-fast stage-cell">18s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">4s</td>
+            <td class="time-fast total-cell">22s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:82%"></div><span class="bar-label">18s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:18%"></div><span class="bar-label">4s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-onboarding <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-7')">&#128269; 12 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-fast   stage-cell">16s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-slow stage-cell">52s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">4s</td>
+            <td class="time-medium total-cell">1m 12s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:22%"></div><span class="bar-label">16s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:72%"></div><span class="bar-label">52s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:6%"></div><span class="bar-label">4s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">onboardingservice <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-8')">&#128269; 12 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-fast   stage-cell">11s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-slow stage-cell">51s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">5s</td>
+            <td class="time-medium total-cell">1m 7s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:16%"></div><span class="bar-label">11s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:76%"></div><span class="bar-label">51s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:7%"></div><span class="bar-label">5s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-email-scheduler <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-9')">&#128269; 12 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-ok   stage-cell">20s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-ok stage-cell">33s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">6s</td>
+            <td class="time-medium total-cell">59s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:34%"></div><span class="bar-label">20s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:56%"></div><span class="bar-label">33s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:10%"></div><span class="bar-label">6s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-edm-operations <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-10')">&#128269; 11 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-fast stage-cell">18s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">4s</td>
+            <td class="time-fast total-cell">22s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:82%"></div><span class="bar-label">18s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:18%"></div><span class="bar-label">4s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-well-program <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-11')">&#128269; 16 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-slow   stage-cell">1m 11s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-ok stage-cell">32s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">2s</td>
+            <td class="time-slow total-cell">1m 45s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:68%"></div><span class="bar-label">1m 11s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:30%"></div><span class="bar-label">32s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:2%"></div><span class="bar-label">2s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-attachment-upload <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-12')">&#128269; 14 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-slow   stage-cell">1m 15s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-slow   stage-cell">1s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-ok stage-cell">32s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">1m 42s</td>
+            <td class="time-slow total-cell">3m 30s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:36%"></div><span class="bar-label">1m 15s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:15%"></div><span class="bar-label">32s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:49%"></div><span class="bar-label">1m 42s</span></div></td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-image-upload <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260804163537-13')">&#128269; 13 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-slow   stage-cell">38s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-fast stage-cell">21s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">6s</td>
+            <td class="time-medium total-cell">1m 5s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:58%"></div><span class="bar-label">38s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:32%"></div><span class="bar-label">21s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:9%"></div><span class="bar-label">6s</span></div></td>
+        </tr>        <tr class="avg-row">
+            <td class="svc-name">Avg Average</td>
+            <td class="stage-cell">5.4s</td>
+            <td class="stage-cell">22.2s</td>
+            <td class="stage-cell">0s</td>
+            <td class="stage-cell">< 1s</td>
+            <td class="stage-cell">0s</td>
+            <td class="stage-cell">30.6s</td>
+            <td class="stage-cell">11.4s</td>
+            <td class="total-cell">1m 9.6s</td>
+            <td colspan="7"></td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+    <div class="event-panel" id="evt-20260804163537-1" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-edmcopyservice</strong> (microservice-edmcopyservice-595d8674bd-wd6rm)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-1')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:13:01.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-edmcopyservice-595d8674bd-wd6rm to ip-10-4-198-192.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:02.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:02.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:02.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:03.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:03.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:03.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:05.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-edmcopyservice</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:05.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-edmcopyservice</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:05.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-edmcopyservice/dev-integration-branch:2026-07-30.528&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:13:05.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-edmcopyservice/dev-integration-branch:2026-07-30.528&quot; in 220ms (220ms including waiting). Image size: 466786339 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-2" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>dsisunitservice</strong> (dsisunitservice-6f84b8ccf5-tlqtz)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-2')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:14:16.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/dsisunitservice-6f84b8ccf5-tlqtz to ip-10-4-184-54.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:17.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:17.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:17.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:18.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:18.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:18.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:14:19.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.185.38:15021/healthz/ready&quot;: dial tcp 10.4.185.38:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:22.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/dsisunitservice/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.127&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:24.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container dsisunitservice</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:24.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: dsisunitservice</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:14:24.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/dsisunitservice/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.127&quot; in 2.024s (2.024s including waiting). Image size: 488861177 bytes.</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:15:16.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Liveness probe failed: HTTP probe failed with statuscode: 500</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:15:22.000</td>
+                    <td class="evt-reason">Unhealthy </td>
+                    <td class="evt-message">Readiness probe failed: HTTP probe failed with statuscode: 500</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-3" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-bhacasegeneration</strong> (microservice-bhacasegeneration-6bcc8cd4f5-cpd4b)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-3')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-warning">
+                    <td class="mono small">16:16:12.000</td>
+                    <td class="evt-reason">FailedScheduling <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">0/242 nodes are available: 211 Insufficient memory, 23 node(s) had untolerated taint(s), 7 node(s) were unschedulable, 76 Insufficient cpu. no new claims to deallocate, preemption: 0/242 nodes are available: 212 No preemption victims found for incoming pod, 30 Preemption is not helpful for scheduling.</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:16:20.000</td>
+                    <td class="evt-reason">FailedScheduling <span class="evt-count">&times;9</span></td>
+                    <td class="evt-message">0/243 nodes are available: 211 Insufficient memory, 24 node(s) had untolerated taint(s), 7 node(s) were unschedulable, 76 Insufficient cpu. no new claims to deallocate, preemption: 0/243 nodes are available: 212 No preemption victims found for incoming pod, 31 Preemption is not helpful for scheduling.</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:16:21.000</td>
+                    <td class="evt-reason">NotTriggerScaleUp </td>
+                    <td class="evt-message">pod didn&#39;t trigger scale-up: 4 max node group size reached, 1 in backoff after failed scale-up, 1 node(s) had untolerated taint {bigmemory: true}, 1 node(s) had untolerated taint {prom: true}, 1 node(s) had untolerated taint {landmark: asi}</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:16:38.000</td>
+                    <td class="evt-reason">Nominated </td>
+                    <td class="evt-message">Pod should schedule on: nodeclaim/linux-8ptq2</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:16:53.000</td>
+                    <td class="evt-reason">FailedScheduling <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">0/243 nodes are available: 212 Insufficient memory, 23 node(s) had untolerated taint(s), 7 node(s) were unschedulable, 76 Insufficient cpu. no new claims to deallocate, preemption: 0/243 nodes are available: 213 No preemption victims found for incoming pod, 30 Preemption is not helpful for scheduling.</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:17:00.000</td>
+                    <td class="evt-reason">FailedScheduling <span class="evt-count">&times;4</span></td>
+                    <td class="evt-message">0/244 nodes are available: 212 Insufficient memory, 24 node(s) had untolerated taint(s), 7 node(s) were unschedulable, 76 Insufficient cpu. no new claims to deallocate, preemption: 0/244 nodes are available: 213 No preemption victims found for incoming pod, 31 Preemption is not helpful for scheduling.</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:17:02.000</td>
+                    <td class="evt-reason">FailedScheduling </td>
+                    <td class="evt-message">0/244 nodes are available: 212 Insufficient memory, 24 node(s) had untolerated taint(s), 7 node(s) were unschedulable, 75 Insufficient cpu. no new claims to deallocate, preemption: 0/244 nodes are available: 213 No preemption victims found for incoming pod, 31 Preemption is not helpful for scheduling.</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:22.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-bhacasegeneration-6bcc8cd4f5-cpd4b to ip-10-4-195-60.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:23.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:26.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:26.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:26.000</td>
+                    <td class="evt-reason">TaintManagerEviction </td>
+                    <td class="evt-message">Cancelling deletion of Pod dwp/microservice-bhacasegeneration-6bcc8cd4f5-cpd4b</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:26.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; in 3.449s (3.449s including waiting). Image size: 99475158 bytes.</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:31.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:31.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:32.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:17:33.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.200.166:15021/healthz/ready&quot;: dial tcp 10.4.200.166:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:17:35.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-bhacasegeneration/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.632&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:03.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-bhacasegeneration</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:03.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-bhacasegeneration</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:03.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-bhacasegeneration/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.632&quot; in 27.86s (27.86s including waiting). Image size: 318363023 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-4" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-geothermal-gradient</strong> (microservice-geothermal-gradient-856455d6b7-9v7ds)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-4')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:18:52.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:52.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:52.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-geothermal-gradient-856455d6b7-9v7ds to ip-10-4-185-229.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:52.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:53.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:53.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:53.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:18:55.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-geothermal-gradient/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.265&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:19:08.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-geothermal-gradient</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:19:08.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-geothermal-gradient</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:19:08.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-geothermal-gradient/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.265&quot; in 12.374s (12.374s including waiting). Image size: 251641017 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-5" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-keda-custom-scaler</strong> (microservice-keda-custom-scaler-5c88c668df-fklk4)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-5')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:19:54.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-keda-custom-scaler-5c88c668df-fklk4 to ip-10-4-166-135.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:19:55.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-keda-custom-scaler/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.33&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:19:57.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-keda-custom-scaler</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:19:57.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-keda-custom-scaler</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:19:57.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-keda-custom-scaler/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.33&quot; in 1.878s (1.878s including waiting). Image size: 186968972 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-6" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-content</strong> (microservice-content-58bbff8fc-88rgt)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-6')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:20:44.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:44.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:44.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-content-58bbff8fc-88rgt to ip-10-4-240-186.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:45.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:46.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:46.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:46.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:48.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-content</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:48.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-content</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:48.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-content/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.1509&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:20:48.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-content/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.1509&quot; in 249ms (249ms including waiting). Image size: 536222028 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-7" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-onboarding</strong> (microservice-onboarding-7f5cd88bf4-8ndkc)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-7')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:21:42.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:21:42.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:21:42.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-onboarding-7f5cd88bf4-8ndkc to ip-10-4-185-229.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:21:43.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:21:43.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:21:43.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:21:43.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:21:44.000</td>
+                    <td class="evt-reason">Unhealthy </td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.178.224:15021/healthz/ready&quot;: dial tcp 10.4.178.224:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:21:46.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-onboarding/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.431&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:22:02.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-onboarding</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:22:02.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-onboarding</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:22:02.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-onboarding/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.431&quot; in 15.914s (15.914s including waiting). Image size: 354971606 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-8" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>onboardingservice</strong> (onboardingservice-6bd546df67-2j4w9)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-8')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:23:27.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/onboardingservice-6bd546df67-2j4w9 to ip-10-4-224-69.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:28.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:28.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:28.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:29.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:29.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:29.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:23:31.000</td>
+                    <td class="evt-reason">Unhealthy </td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.233.164:15021/healthz/ready&quot;: dial tcp 10.4.233.164:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:32.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/onboardingservice/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.305&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:43.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container onboardingservice</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:43.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: onboardingservice</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:23:43.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/onboardingservice/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.305&quot; in 10.64s (10.64s including waiting). Image size: 639328775 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-9" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-email-scheduler</strong> (microservice-email-scheduler-6c5c478798-gnnfj)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-9')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:25:08.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-email-scheduler-6c5c478798-gnnfj to ip-10-4-205-143.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:09.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:09.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:09.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:10.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:11.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:11.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:25:12.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.211.69:15021/healthz/ready&quot;: dial tcp 10.4.211.69:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:14.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-email-scheduler/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.136&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:34.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-email-scheduler</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:34.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-email-scheduler</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:25:34.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-email-scheduler/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.136&quot; in 19.341s (19.341s including waiting). Image size: 354100328 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-10" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-edm-operations</strong> (microservice-edm-operations-5d9668644f-66zmb)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-10')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:26:42.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-edm-operations-5d9668644f-66zmb to ip-10-4-216-63.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:43.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:43.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:43.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:44.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:44.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:44.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:46.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-edm-operations</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:46.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-edm-operations</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:46.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/microservice-edm-operations:dev-integration-branch.2922&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:26:46.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/microservice-edm-operations:dev-integration-branch.2922&quot; in 302ms (302ms including waiting). Image size: 547551187 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-11" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-well-program</strong> (microservice-well-program-6f7c6f4f64-9lhw4)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-11')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:27:44.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-well-program-6f7c6f4f64-9lhw4 to ip-10-4-198-178.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:46.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:47.000</td>
+                    <td class="evt-reason">TaintManagerEviction </td>
+                    <td class="evt-message">Cancelling deletion of Pod dwp/microservice-well-program-6f7c6f4f64-9lhw4</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:51.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:51.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:51.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; in 4.739s (4.739s including waiting). Image size: 99475158 bytes.</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:55.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:55.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:27:55.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:27:56.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;4</span></td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.219.37:15021/healthz/ready&quot;: dial tcp 10.4.219.37:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:28:00.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-well-program/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.208&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:28:57.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-well-program</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:28:57.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-well-program</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:28:57.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-well-program/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.208&quot; in 56.548s (56.548s including waiting). Image size: 292881761 bytes.</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:29:09.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Readiness probe failed: HTTP probe failed with statuscode: 500</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:29:14.000</td>
+                    <td class="evt-reason">Unhealthy </td>
+                    <td class="evt-message">Liveness probe failed: HTTP probe failed with statuscode: 500</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-12" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-attachment-upload</strong> (microservice-attachment-upload-56c5d5c4b9-vj7tn)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-12')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:30:07.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-attachment-upload-56c5d5c4b9-vj7tn to ip-10-4-198-178.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:30:14.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:30:18.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:30:19.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:31:45.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:31:46.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:31:46.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:31:47.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.199.144:15021/healthz/ready&quot;: dial tcp 10.4.199.144:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:31:49.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-attachment-upload/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.362&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:33:04.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-attachment-upload/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.362&quot; in 1m14.984s (1m14.984s including waiting). Image size: 326266286 bytes.</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:33:05.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-attachment-upload</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:33:05.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-attachment-upload</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:33:17.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Readiness probe failed: HTTP probe failed with statuscode: 500</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:33:18.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;2</span></td>
+                    <td class="evt-message">Liveness probe failed: HTTP probe failed with statuscode: 500</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>    <div class="event-panel" id="evt-20260804163537-13" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-image-upload</strong> (microservice-image-upload-7bc996dd45-wssm6)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260804163537-13')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">16:34:15.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-image-upload-7bc996dd45-wssm6 to ip-10-4-234-185.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:16.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:16.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:16.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:16.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:16.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:16.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:34:17.000</td>
+                    <td class="evt-reason">Unhealthy <span class="evt-count">&times;3</span></td>
+                    <td class="evt-message">Startup probe failed: Get &quot;http://10.4.249.55:15021/healthz/ready&quot;: dial tcp 10.4.249.55:15021: connect: connection refused</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:21.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-image-upload/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.321&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:59.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-image-upload</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:59.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-image-upload</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">16:34:59.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-image-upload/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.321&quot; in 37.924s (37.925s including waiting). Image size: 337695013 bytes.</td>
+                </tr>                <tr class="evt-warning">
+                    <td class="mono small">16:35:10.000</td>
+                    <td class="evt-reason">Unhealthy </td>
+                    <td class="evt-message">Readiness probe failed: HTTP probe failed with statuscode: 500</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+<!-- SECTION 2 - Full Results -->
+<div class="section-wrap">
+    <div class="section-title">&#x1F4CB; Full Results</div>
+    <div class="section-sub">Complete per-service result including pod names, timestamps, and resource requests.</div>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Service</th>
+                <th>Status</th>
+                <th>Deleted Pod</th>
+                <th>New Pod</th>
+                <th>Deleted At</th>
+                <th>Pod Created</th>
+                <th>Pod Ready</th>
+                <th>Scheduling</th>
+                <th>Image Pull</th>
+                <th>Istio Pull</th>
+                <th>Container Create</th>
+                <th>Container Start</th>
+                <th>Readiness</th>
+                <th>Total Ready Time</th>
+                <th>CPU Req</th>
+                <th>Mem Req</th>
+                <th>Node</th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td class="svc-name">microservice-edmcopyservice</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-edmcopyservice-595d8674bd-9z8ff</td>
+            <td class="mono small">microservice-edmcopyservice-595d8674bd-wd6rm</td>
+            <td>16:12:58</td>
+            <td>16:13:01</td>
+            <td>16:13:43</td>
+            <td>0s</td>
+            <td>0s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>38s</td>
+            <td class="time-medium total-cell">42s</td>
+            <td class="mono small">600m</td>
+            <td class="mono small">1536Mi</td>
+            <td class="mono small">ip-10-4-198-192.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">dsisunitservice</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">dsisunitservice-6f84b8ccf5-7hsvb</td>
+            <td class="mono small">dsisunitservice-6f84b8ccf5-tlqtz</td>
+            <td>16:14:14</td>
+            <td>16:14:16</td>
+            <td>16:15:32</td>
+            <td>0s</td>
+            <td>2s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>1m 8s</td>
+            <td class="time-medium total-cell">1m 16s</td>
+            <td class="mono small">200m</td>
+            <td class="mono small">512Mi</td>
+            <td class="mono small">ip-10-4-208-107.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-bhacasegeneration</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-bhacasegeneration-6bcc8cd4f5-5frdm</td>
+            <td class="mono small">microservice-bhacasegeneration-6bcc8cd4f5-cpd4b</td>
+            <td>16:16:10</td>
+            <td>16:16:12</td>
+            <td>16:18:15</td>
+            <td>1m 10s</td>
+            <td>40s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>12s</td>
+            <td class="time-slow total-cell">2m 3s</td>
+            <td class="mono small">400m</td>
+            <td class="mono small">3Gi</td>
+            <td class="mono small">ip-10-4-185-143.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-geothermal-gradient</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-geothermal-gradient-856455d6b7-scznj</td>
+            <td class="mono small">microservice-geothermal-gradient-856455d6b7-9v7ds</td>
+            <td>16:18:50</td>
+            <td>16:18:52</td>
+            <td>16:19:19</td>
+            <td>0s</td>
+            <td>13s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>11s</td>
+            <td class="time-fast total-cell">27s</td>
+            <td class="mono small">100m</td>
+            <td class="mono small">256Mi</td>
+            <td class="mono small">ip-10-4-203-120.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-keda-custom-scaler</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-keda-custom-scaler-5c88c668df-5j8m2</td>
+            <td class="mono small">microservice-keda-custom-scaler-5c88c668df-fklk4</td>
+            <td>16:19:53</td>
+            <td>16:19:54</td>
+            <td>16:20:09</td>
+            <td>0s</td>
+            <td>2s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>12s</td>
+            <td class="time-fast total-cell">15s</td>
+            <td class="mono small">500m</td>
+            <td class="mono small">512Mi</td>
+            <td class="mono small">ip-10-4-240-186.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-content</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-content-58bbff8fc-2k8z4</td>
+            <td class="mono small">microservice-content-58bbff8fc-88rgt</td>
+            <td>16:20:42</td>
+            <td>16:20:44</td>
+            <td>16:21:06</td>
+            <td>0s</td>
+            <td>0s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>18s</td>
+            <td class="time-fast total-cell">22s</td>
+            <td class="mono small">400m</td>
+            <td class="mono small">256Mi</td>
+            <td class="mono small">ip-10-4-205-143.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-onboarding</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-onboarding-7f5cd88bf4-5xm27</td>
+            <td class="mono small">microservice-onboarding-7f5cd88bf4-8ndkc</td>
+            <td>16:21:40</td>
+            <td>16:21:42</td>
+            <td>16:22:54</td>
+            <td>0s</td>
+            <td>16s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>52s</td>
+            <td class="time-medium total-cell">1m 12s</td>
+            <td class="mono small">200m</td>
+            <td class="mono small">1Gi</td>
+            <td class="mono small">ip-10-4-240-186.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">onboardingservice</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">onboardingservice-6bd546df67-7nmv6</td>
+            <td class="mono small">onboardingservice-6bd546df67-2j4w9</td>
+            <td>16:23:26</td>
+            <td>16:23:27</td>
+            <td>16:24:34</td>
+            <td>0s</td>
+            <td>11s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>51s</td>
+            <td class="time-medium total-cell">1m 7s</td>
+            <td class="mono small">250m</td>
+            <td class="mono small">1Gi</td>
+            <td class="mono small">ip-10-4-210-6.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-email-scheduler</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-email-scheduler-6c5c478798-zmncw</td>
+            <td class="mono small">microservice-email-scheduler-6c5c478798-gnnfj</td>
+            <td>16:25:06</td>
+            <td>16:25:08</td>
+            <td>16:26:07</td>
+            <td>0s</td>
+            <td>20s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>33s</td>
+            <td class="time-medium total-cell">59s</td>
+            <td class="mono small">100m</td>
+            <td class="mono small">128Mi</td>
+            <td class="mono small">ip-10-4-160-186.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-edm-operations</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-edm-operations-5d9668644f-2l8qn</td>
+            <td class="mono small">microservice-edm-operations-5d9668644f-66zmb</td>
+            <td>16:26:40</td>
+            <td>16:26:42</td>
+            <td>16:27:04</td>
+            <td>0s</td>
+            <td>0s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>18s</td>
+            <td class="time-fast total-cell">22s</td>
+            <td class="mono small">200m</td>
+            <td class="mono small">256Mi</td>
+            <td class="mono small">ip-10-4-216-63.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-well-program</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-well-program-6f7c6f4f64-6jprh</td>
+            <td class="mono small">microservice-well-program-6f7c6f4f64-9lhw4</td>
+            <td>16:27:42</td>
+            <td>16:27:44</td>
+            <td>16:29:29</td>
+            <td>0s</td>
+            <td>1m 11s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>32s</td>
+            <td class="time-slow total-cell">1m 45s</td>
+            <td class="mono small">200m</td>
+            <td class="mono small">256Mi</td>
+            <td class="mono small">ip-10-4-196-89.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-attachment-upload</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-attachment-upload-56c5d5c4b9-ngwpx</td>
+            <td class="mono small">microservice-attachment-upload-56c5d5c4b9-vj7tn</td>
+            <td>16:30:06</td>
+            <td>16:30:07</td>
+            <td>16:33:37</td>
+            <td>0s</td>
+            <td>1m 15s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>1s</td>
+            <td>0s</td>
+            <td>32s</td>
+            <td class="time-slow total-cell">3m 30s</td>
+            <td class="mono small">200m</td>
+            <td class="mono small">256Mi</td>
+            <td class="mono small">ip-10-4-160-186.ec2.internal</td>
+        </tr>        <tr>
+            <td class="svc-name">microservice-image-upload</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-image-upload-7bc996dd45-5zjpt</td>
+            <td class="mono small">microservice-image-upload-7bc996dd45-wssm6</td>
+            <td>16:34:13</td>
+            <td>16:34:15</td>
+            <td>16:35:20</td>
+            <td>0s</td>
+            <td>38s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>21s</td>
+            <td class="time-medium total-cell">1m 5s</td>
+            <td class="mono small">200m</td>
+            <td class="mono small">256Mi</td>
+            <td class="mono small">ip-10-4-240-234.ec2.internal</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+</body>
+</html>

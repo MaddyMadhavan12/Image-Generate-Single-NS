@@ -1,0 +1,69 @@
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+.\Pod-Status.ps1 `
+    -KubeConfig "C:\Users\madhavan.n\Music\oec-config\oec-config.yaml" `
+    -Namespace "dwp-base" `
+    -Sequential `
+    -PullType "Cached" `
+    -PodPrefix "base-mt-util-d" `
+    -OutputFile "PreChecking-Report-Dwp-Base-$(Get-Date -Format 'ddMMyy-HHmm').html" `
+    -ServiceNames @(
+        "microservice-edmcopyservice"
+        "dsisunitservice"
+        "microservice-bhacasegeneration"
+        "microservice-geothermal-gradient"
+        "microservice-keda-custom-scaler"
+        "microservice-content"
+        "microservice-onboarding"
+        "onboardingservice"
+        "microservice-email-scheduler"
+        "microservice-edm-operations"
+        "microservice-well-program"
+        "microservice-attachment-upload"
+        "microservice-image-upload"
+    )
+----------------
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+.\Pod-Status.ps1 `
+    -KubeConfig "C:\Users\madhavan.n\Music\oec-config\oec-config.yaml" `
+    -Namespace "dwp" `
+    -Sequential `
+    -PullType "Cached" `
+    -OutputFile "PreChecking-Report-Dwp-Base-$(Get-Date -Format 'ddMMyy-HHmm').html" `
+    -ServiceNames @(
+        "microservice-edmcopyservice"
+        "dsisunitservice"
+        "microservice-bhacasegeneration"
+        "microservice-geothermal-gradient"
+        "microservice-keda-custom-scaler"
+        "microservice-content"
+        "microservice-onboarding"
+        "onboardingservice"
+        "microservice-email-scheduler"
+        "microservice-edm-operations"
+        "microservice-well-program"
+        "microservice-attachment-upload"
+        "microservice-image-upload"
+    )
+	
+-------------------------
+
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+.\Pod-Status.ps1 `
+    -KubeConfig "C:\Users\madhavan.n\Music\oec-config\oec-config.yaml" `
+    -Namespace "dwp" `
+    -Sequential `
+    -PullType "Cached" `
+    -OutputFile "PreChecking-Report-Dwp-Base-$(Get-Date -Format 'ddMMyy-HHmm').html" `
+    -ServiceNames @(
+microservice-torquedrag-rule
+
+microservice-trajectory
+
+microservice-geo-magnetic
+
+microservice-uwi
+    )

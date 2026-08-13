@@ -1,0 +1,443 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[DWP] Pod Readiness Benchmark</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fb; color: #1a1a2e; font-size: 13px; }
+
+        /* -- Header ------------------------------------------- */
+        header {
+            background: linear-gradient(135deg, #4a6cf7 0%, #7c3aed 100%);
+            padding: 36px 40px 32px;
+            text-align: center;
+            color: #fff;
+        }
+        header .icon { font-size: 36px; margin-bottom: 8px; }
+        header h1   { font-size: 28px; font-weight: 700; margin-bottom: 8px; letter-spacing: -0.3px; }
+        header .sub { font-size: 13px; opacity: 0.85; margin-bottom: 14px; }
+        header .meta {
+            display: inline-flex; flex-wrap: wrap; gap: 0;
+            background: rgba(255,255,255,0.15); border-radius: 6px;
+            padding: 6px 16px; font-size: 12px;
+        }
+        header .meta span { padding: 0 10px; border-right: 1px solid rgba(255,255,255,0.3); }
+        header .meta span:last-child { border-right: none; }
+        header .meta strong { font-weight: 600; }
+
+        /* -- Notice banner --------------------------------------- */
+        .notice {
+            margin: 20px 40px 0; padding: 12px 18px; border-radius: 8px;
+            background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a;
+            font-size: 12px; line-height: 1.6;
+        }
+        .notice strong { color: #1d4ed8; }
+
+        /* -- Summary cards ------------------------------------- */
+        .summary-grid {
+            display: flex; flex-wrap: wrap; gap: 20px;
+            padding: 28px 40px;
+            background: #fff;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-left: 4px solid #4a6cf7;
+            border-radius: 8px;
+            padding: 18px 24px;
+            min-width: 150px;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        }
+        .card.green  { border-left-color: #10b981; }
+        .card.red    { border-left-color: #ef4444; }
+        .card.yellow { border-left-color: #f59e0b; }
+        .card .label { font-size: 10px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px; }
+        .card .value { font-size: 26px; font-weight: 800; color: #4a6cf7; }
+        .card.green  .value { color: #10b981; }
+        .card.red    .value { color: #ef4444; }
+        .card.yellow .value { color: #f59e0b; }
+
+        /* -- Section titles ------------------------------------ */
+        .section-wrap { padding: 28px 40px 0; }
+        .section-title {
+            font-size: 16px; font-weight: 700; color: #1a1a2e;
+            margin-bottom: 4px; display: flex; align-items: center; gap: 8px;
+        }
+        .section-title::after {
+            content: ''; flex: 1; height: 2px;
+            background: linear-gradient(90deg, #4a6cf7 0%, transparent 100%);
+            margin-left: 12px; border-radius: 2px;
+        }
+        .section-sub { font-size: 12px; color: #6b7280; margin-bottom: 16px; }
+
+        /* -- Tables -------------------------------------------- */
+        .table-wrap { padding: 0 40px 36px; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
+        thead th {
+            background: #f8fafc; color: #4b5563;
+            font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+            text-align: left; padding: 11px 14px;
+            border-bottom: 2px solid #e2e8f0;
+            white-space: nowrap; position: sticky; top: 0;
+        }
+        tbody tr { border-bottom: 1px solid #f1f5f9; transition: background 0.1s; }
+        tbody tr:hover { background: #f0f4ff; }
+        tbody td { padding: 10px 14px; vertical-align: middle; }
+
+        .svc-name  { font-weight: 700; color: #1e293b; white-space: nowrap; }
+        .mono      { font-family: 'Consolas', monospace; }
+        .small     { font-size: 11px; color: #94a3b8; }
+
+        .status-success { color: #10b981; font-weight: 700; }
+        .status-failed  { color: #ef4444; font-weight: 700; }
+
+        .time-fast   { color: #10b981; font-weight: 700; }
+        .time-medium { color: #f59e0b; font-weight: 700; }
+        .time-slow   { color: #ef4444; font-weight: 700; }
+        .total-cell  { font-size: 13px; font-weight: 800; white-space: nowrap; }
+
+        .badge {
+            display: inline-block; padding: 2px 8px; border-radius: 12px;
+            font-size: 10px; font-weight: 700; margin-left: 6px; vertical-align: middle;
+        }
+        .badge.cached { background: #dbeafe; color: #1d4ed8; }
+        .badge.fresh  { background: #fef3c7; color: #92400e; }
+
+        /* -- Lifecycle stage table ----------------------------- */
+        .lifecycle-table thead th { background: #f8fafc; }
+        .lifecycle-table thead th.hdr-stage {
+            background: linear-gradient(135deg, #4a6cf7 0%, #7c3aed 100%);
+            color: #fff; text-align: center;
+            border-right: 1px solid rgba(255,255,255,0.2);
+        }
+        .lifecycle-table thead th.hdr-bar {
+            background: #f1f5f9; color: #94a3b8;
+            text-align: center; font-size: 10px;
+        }
+        .lifecycle-table thead .sub-hdr th {
+            background: #f8fafc; color: #6b7280;
+            font-size: 10px; font-weight: 600; padding: 5px 14px 9px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .lifecycle-table thead .sub-hdr th.hdr-stage {
+            background: rgba(74,108,247,0.08); color: #4a6cf7;
+        }
+
+        .stage-cell { text-align: right; white-space: nowrap; font-family: 'Consolas', monospace; font-size: 12px; }
+        .stage-zero { color: #cbd5e1; }
+        .stage-fast { color: #10b981; font-weight: 700; }
+        .stage-ok   { color: #374151; }
+        .stage-slow { color: #ef4444; font-weight: 700; }
+        .stage-unaccounted { color: #94a3b8; font-style: italic; }
+
+        .failed-row td { opacity: 0.4; }
+        .avg-row td { background: #f0f4ff; font-weight: 700; color: #4a6cf7; border-top: 2px solid #e2e8f0; }
+
+        /* bars */
+        .bar-wrap  { display: flex; align-items: center; gap: 6px; min-width: 80px; }
+        .bar       { height: 8px; border-radius: 3px; min-width: 2px; flex-shrink: 0; }
+        .bar-label { font-size: 10px; color: #94a3b8; white-space: nowrap; }
+        .bar-zero  { font-size: 10px; color: #cbd5e1; }
+        .c-sched { background: #4a6cf7; }
+        .c-img   { background: #f59e0b; }
+        .c-istio { background: #8b5cf6; }
+        .c-ccr   { background: #10b981; }
+        .c-cst   { background: #059669; }
+        .c-ready { background: #f87171; }
+        .c-unacct{ background: #cbd5e1; }
+
+        /* legend */
+        .legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 40px 18px; }
+        .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #6b7280; }
+        .legend-dot  { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+        /* -- Event toggle / panel ------------------------------ */
+        .evt-toggle {
+            margin-top: 4px; font-size: 10px; font-weight: 600;
+            background: #eef2ff; color: #4a6cf7; border: 1px solid #c7d2fe;
+            border-radius: 5px; padding: 3px 8px; cursor: pointer;
+        }
+        .evt-toggle:hover { background: #e0e7ff; }
+        .evt-none { font-size: 10px; color: #cbd5e1; }
+
+        .event-panel {
+            margin: 0 40px 18px; background: #0f172a; border-radius: 10px;
+            overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+        }
+        .event-panel-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 12px 18px; background: #1e293b; color: #e2e8f0; font-size: 12px;
+        }
+        .evt-close {
+            background: transparent; border: 1px solid #475569; color: #cbd5e1;
+            border-radius: 5px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+        }
+        .evt-close:hover { background: #334155; }
+        .event-table { width: 100%; border-collapse: collapse; box-shadow: none; border-radius: 0; }
+        .event-table thead th {
+            background: #1e293b; color: #94a3b8; position: static;
+            border-bottom: 1px solid #334155; font-size: 10px;
+        }
+        .event-table tbody tr { border-bottom: 1px solid #1e293b; }
+        .event-table tbody tr:hover { background: #1e293b; }
+        .event-table td { padding: 7px 14px; color: #cbd5e1; font-size: 11px; vertical-align: top; }
+        .event-table .evt-reason { font-weight: 700; white-space: nowrap; color: #93c5fd; }
+        .event-table .evt-message { color: #e2e8f0; }
+        .event-table tr.evt-warning .evt-reason { color: #fca5a5; }
+        .event-table tr.evt-warning .evt-message { color: #fecaca; }
+        .evt-count {
+            display: inline-block; margin-left: 4px; font-size: 9px;
+            background: #334155; color: #cbd5e1; border-radius: 8px; padding: 1px 6px;
+        }
+    </style>
+    <script>
+        function toggleEvents(id) {
+            var el = document.getElementById(id);
+            if (!el) { return; }
+            el.style.display = (el.style.display === 'none') ? 'block' : 'none';
+            if (el.style.display === 'block') {
+                el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+    </script>
+</head>
+<body>
+
+<header>
+    <div class="icon">&#x26A1;</div>
+    <h1>Pod Readiness Benchmark</h1>
+    <div class="sub">Measuring pod startup performance after delete &amp; recreate</div>
+    <div class="meta">
+        <span><strong>Cluster:</strong> DWP</span>
+        <span><strong>Namespace:</strong> dwp</span>
+        <span><strong>Pull Type:</strong> Cached</span>
+        <span><strong>Run:</strong> 2026-08-10 10:53:22</span>
+        <span><strong>Services:</strong> 1</span>
+    </div>
+</header>
+
+<div class="notice">
+    <strong>Note on run-to-run variance:</strong> readiness times for the same service can legitimately differ between runs.
+    Common causes include node-level image cache state, scheduler/node placement (a pod landing on a busy or newly-scaled
+    node takes longer), API server / etcd load when many events fire close together, and cluster autoscaler activity.
+    The <em>Unaccounted</em> column below captures any wall-clock time that isn't attributable to a specific event-based
+    stage (e.g. a Kubernetes event that was throttled, deduplicated, or garbage-collected before it could be read - the
+    API server only retains events for about an hour by default).
+</div>
+
+<div class="summary-grid">
+    <div class="card green">
+        <div class="label">Succeeded</div>
+        <div class="value"></div>
+    </div>
+    <div class="card red">
+        <div class="label">Failed</div>
+        <div class="value">0</div>
+    </div>
+    <div class="card">
+        <div class="label">Avg Total Ready Time</div>
+        <div class="value">1m 2s</div>
+    </div>
+    <div class="card yellow">
+        <div class="label">Slowest</div>
+        <div class="value">1m 2s</div>
+    </div>
+    <div class="card green">
+        <div class="label">Fastest</div>
+        <div class="value">1m 2s</div>
+    </div>
+</div>
+
+<!-- SECTION 1 - Lifecycle Stage Breakdown -->
+<div class="section-wrap">
+    <div class="section-title">&#x23F1; Pod Lifecycle Stage Breakdown</div>
+    <div class="section-sub">Time spent in each stage from pod creation to ready. <span style="color:#ef4444;font-weight:700">Red</span> = &gt;25% above average &nbsp;|&nbsp; <span style="color:#10b981;font-weight:700">Green</span> = &gt;25% below average. Click &#128269; on a service to inspect its raw Kubernetes events.</div>
+</div>
+
+<div class="legend">
+    <div class="legend-item"><div class="legend-dot c-sched"></div>Scheduling</div>
+    <div class="legend-item"><div class="legend-dot c-img"></div>Image Pull</div>
+    <div class="legend-item"><div class="legend-dot c-istio"></div>Istio Pull</div>
+    <div class="legend-item"><div class="legend-dot c-ccr"></div>Container Create</div>
+    <div class="legend-item"><div class="legend-dot c-cst"></div>Container Start</div>
+    <div class="legend-item"><div class="legend-dot c-ready"></div>Readiness</div>
+    <div class="legend-item"><div class="legend-dot c-unacct"></div>Unaccounted</div>
+</div>
+
+<div class="table-wrap">
+    <table class="lifecycle-table">
+        <thead>
+            <tr>
+                <th rowspan="2" style="vertical-align:bottom">Service</th>
+                <th class="hdr-stage" colspan="8">Stage Durations</th>
+                <th class="hdr-bar"   colspan="7">Proportion of Total Ready Time</th>
+            </tr>
+            <tr class="sub-hdr">
+                <th class="hdr-stage" style="text-align:right">1. Scheduling</th>
+                <th class="hdr-stage" style="text-align:right">2. Image Pull</th>
+                <th class="hdr-stage" style="text-align:right">3. Istio Pull</th>
+                <th class="hdr-stage" style="text-align:right">4. Ctr Create</th>
+                <th class="hdr-stage" style="text-align:right">5. Ctr Start</th>
+                <th class="hdr-stage" style="text-align:right">6. Readiness</th>
+                <th class="hdr-stage" style="text-align:right">7. Unaccounted</th>
+                <th class="hdr-stage" style="text-align:right;border-right:none">Total Ready Time</th>
+                <th class="hdr-bar">Scheduling</th>
+                <th class="hdr-bar">Image Pull</th>
+                <th class="hdr-bar">Istio Pull</th>
+                <th class="hdr-bar">Ctr Create</th>
+                <th class="hdr-bar">Ctr Start</th>
+                <th class="hdr-bar">Readiness</th>
+                <th class="hdr-bar">Unaccounted</th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td class="svc-name">microservice-complexity-index <span class="badge cached">Cached</span><br/><button class="evt-toggle" onclick="toggleEvents('evt-20260810105322-1')">&#128269; 11 events</button></td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-ok   stage-cell">1s</td>
+            <td class="stage-zero stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-zero   stage-cell">0s</td>
+            <td class="stage-ok stage-cell">57s</td>
+            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">4s</td>
+            <td class="time-medium total-cell">1m 2s</td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-img" style="width:2%"></div><span class="bar-label">1s</span></div></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><span class="bar-zero">-</span></td>
+            <td><div class="bar-wrap"><div class="bar c-ready" style="width:92%"></div><span class="bar-label">57s</span></div></td>
+            <td><div class="bar-wrap"><div class="bar c-unacct" style="width:6%"></div><span class="bar-label">4s</span></div></td>
+        </tr>        <tr class="avg-row">
+            <td class="svc-name">Avg Average</td>
+            <td class="stage-cell">0s</td>
+            <td class="stage-cell">1s</td>
+            <td class="stage-cell">0s</td>
+            <td class="stage-cell">0s</td>
+            <td class="stage-cell">0s</td>
+            <td class="stage-cell">57s</td>
+            <td class="stage-cell">4s</td>
+            <td class="total-cell">1m 2s</td>
+            <td colspan="7"></td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+    <div class="event-panel" id="evt-20260810105322-1" style="display:none">
+        <div class="event-panel-header">
+            <span>&#128203; Raw Kubernetes events &mdash; <strong>microservice-complexity-index</strong> (microservice-complexity-index-59667dd5f4-mb298)</span>
+            <button class="evt-close" onclick="toggleEvents('evt-20260810105322-1')">&times; Close</button>
+        </div>
+        <table class="event-table">
+            <thead>
+                <tr><th style="width:110px">Time</th><th style="width:160px">Reason</th><th>Message</th></tr>
+            </thead>
+            <tbody>
+                <tr class="evt-normal">
+                    <td class="mono small">10:52:04.000</td>
+                    <td class="evt-reason">Scheduled </td>
+                    <td class="evt-message">Successfully assigned dwp/microservice-complexity-index-59667dd5f4-mb298 to ip-10-4-216-83.ec2.internal</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:05.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:05.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-init</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:05.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:06.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:06.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: istio-proxy</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:06.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Container image &quot;gcr.io/istio-release/proxyv2:1.27.1&quot; already present on machine</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:08.000</td>
+                    <td class="evt-reason">Pulling </td>
+                    <td class="evt-message">Pulling image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-complexity-index/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.132&quot;</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:09.000</td>
+                    <td class="evt-reason">Started </td>
+                    <td class="evt-message">Started container microservice-complexity-index</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:09.000</td>
+                    <td class="evt-reason">Created </td>
+                    <td class="evt-message">Created container: microservice-complexity-index</td>
+                </tr>                <tr class="evt-normal">
+                    <td class="mono small">10:52:09.000</td>
+                    <td class="evt-reason">Pulled </td>
+                    <td class="evt-message">Successfully pulled image &quot;dswc-docker-snapshots.repo.snapshots.ds365.ai/dwp/microservice-complexity-index/17.2.04/dev-integration-branch:17.2.04-dev-integration-branch.132&quot; in 1.275s (1.275s including waiting). Image size: 456270298 bytes.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+<!-- SECTION 2 - Full Results -->
+<div class="section-wrap">
+    <div class="section-title">&#x1F4CB; Full Results</div>
+    <div class="section-sub">Complete per-service result including pod names, timestamps, and resource requests.</div>
+</div>
+
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Service</th>
+                <th>Status</th>
+                <th>Deleted Pod</th>
+                <th>New Pod</th>
+                <th>Deleted At</th>
+                <th>Pod Created</th>
+                <th>Pod Ready</th>
+                <th>Scheduling</th>
+                <th>Image Pull</th>
+                <th>Istio Pull</th>
+                <th>Container Create</th>
+                <th>Container Start</th>
+                <th>Readiness</th>
+                <th>Total Ready Time</th>
+                <th>CPU Req</th>
+                <th>Mem Req</th>
+                <th>Node</th>
+            </tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td class="svc-name">microservice-complexity-index</td>
+            <td class="status-success">Success</td>
+            <td class="mono small">microservice-complexity-index-59667dd5f4-995l9</td>
+            <td class="mono small">microservice-complexity-index-59667dd5f4-mb298</td>
+            <td>10:52:02</td>
+            <td>10:52:04</td>
+            <td>10:53:06</td>
+            <td>0s</td>
+            <td>1s <span class="badge cached">Cached</span></td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>0s</td>
+            <td>57s</td>
+            <td class="time-medium total-cell">1m 2s</td>
+            <td class="mono small">200m</td>
+            <td class="mono small">512Mi</td>
+            <td class="mono small">ip-10-4-223-183.ec2.internal</td>
+        </tr>
+        </tbody>
+    </table>
+</div>
+
+</body>
+</html>
