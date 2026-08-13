@@ -85,6 +85,22 @@ function Format-Seconds {
     return $r.Trim()
 }
 
+function Get-DurationFromPulledMessage {
+    param([string]$Message)
+    # kubelet's "Pulled" event message embeds the real pull duration, e.g.:
+    #   Successfully pulled image "..." in 352ms (352ms including waiting). Image size: ...
+    #   Successfully pulled image "..." in 5.943326931s
+    # This has full sub-second precision, unlike the event's firstTimestamp
+    # (which is only accurate to the whole second). Prefer this when present.
+    if ($Message -match 'in\s+([\d.]+)(ms|s)\b') {
+        $value = [double]$Matches[1]
+        $unit  = $Matches[2]
+        if ($unit -eq 'ms') { return $value / 1000.0 }
+        return $value
+    }
+    return $null
+}
+
 function Test-PodNameMatch {
     param(
         [string]$PodName,
@@ -126,6 +142,8 @@ function Get-PodLifecycleFromEvents {
         ContainerStarted      = $null
         PodReady              = $null
         ImageCached           = $false
+        ImagePullTimeFromMsg  = $null
+        IstioImagePullTimeFromMsg = $null
         SchedulingTime        = 0
         ImagePullTime         = 0
         IstioImagePullTime    = 0
@@ -175,9 +193,15 @@ function Get-PodLifecycleFromEvents {
                         }
                     } else {
                         if ($message -match "istio") {
-                            if (-not $lc.IstioPulled) { $lc.IstioPulled = $ts }
+                            if (-not $lc.IstioPulled) {
+                                $lc.IstioPulled = $ts
+                                if (-not $lc.IstioImagePullTimeFromMsg) { $lc.IstioImagePullTimeFromMsg = Get-DurationFromPulledMessage $message }
+                            }
                         } else {
-                            if (-not $lc.ImagePulled) { $lc.ImagePulled = $ts }
+                            if (-not $lc.ImagePulled) {
+                                $lc.ImagePulled = $ts
+                                if (-not $lc.ImagePullTimeFromMsg) { $lc.ImagePullTimeFromMsg = Get-DurationFromPulledMessage $message }
+                            }
                         }
                     }
                 }
@@ -210,12 +234,26 @@ function Get-PodLifecycleFromEvents {
     if ($lc.PodCreated -and $lc.Scheduled) {
         $lc.SchedulingTime = [math]::Max(0, ($lc.Scheduled - $lc.PodCreated).TotalSeconds)
     }
-    if ($lc.PullingStarted -and $lc.ImagePulled) {
+
+    # Image pull time: prefer the sub-second duration kubelet embeds in the
+    # "Pulled" event message (e.g. "in 352ms") over the difference between
+    # Pulling/Pulled *event* timestamps. Event firstTimestamp is only accurate
+    # to the whole second, so any pull under ~1s (very common) rounds down to
+    # exactly 0s via subtraction and becomes visually indistinguishable from a
+    # truly cached ("already present on machine") pull. The message text does
+    # not suffer from that rounding, so it's a strictly better source when present.
+    if ($null -ne $lc.ImagePullTimeFromMsg) {
+        $lc.ImagePullTime = $lc.ImagePullTimeFromMsg
+    } elseif ($lc.PullingStarted -and $lc.ImagePulled) {
         $lc.ImagePullTime = [math]::Max(0, ($lc.ImagePulled - $lc.PullingStarted).TotalSeconds)
     }
-    if ($lc.IstioPullingStarted -and $lc.IstioPulled) {
+
+    if ($null -ne $lc.IstioImagePullTimeFromMsg) {
+        $lc.IstioImagePullTime = $lc.IstioImagePullTimeFromMsg
+    } elseif ($lc.IstioPullingStarted -and $lc.IstioPulled) {
         $lc.IstioImagePullTime = [math]::Max(0, ($lc.IstioPulled - $lc.IstioPullingStarted).TotalSeconds)
     }
+
     if ($lc.ImagePulled -and $lc.ContainerCreated) {
         $lc.ContainerCreationTime = [math]::Max(0, ($lc.ContainerCreated - $lc.ImagePulled).TotalSeconds)
     }
@@ -626,8 +664,8 @@ Write-Host "====================================================================
 Write-Host "  SUMMARY" -ForegroundColor Cyan
 Write-Host "=====================================================================================================" -ForegroundColor Cyan
 
-$successResults = $results | Where-Object { $_.Status -eq "Success" }
-$failedResults  = $results | Where-Object { $_.Status -ne "Success" }
+$successResults = @($results | Where-Object { $_.Status -eq "Success" })
+$failedResults  = @($results | Where-Object { $_.Status -ne "Success" })
 
 foreach ($r in $results) {
     $statusColor = if ($r.Status -eq "Success") { "Green" } else { "Red" }

@@ -5,7 +5,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
     -Namespace "dwp" `
     -Sequential `
     -PullType "Cached" `
-    -OutputFile "Consolidated-Report-Part3$(Get-Date -Format 'ddMMyy-HHmm').html" `
+    -OutputFile "Dev_Integration_Branch-$(Get-Date -Format 'ddMMyy-HHmm').html" `
     -ServiceNames @(
         "microservice-casing-design",
         "microservice-geological-prognosis",

@@ -1,0 +1,68 @@
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+
+.\Pod-Status.ps1 `
+    -KubeConfig "C:\Users\madhavan.n\Music\oec-config\oec-config.yaml" `
+    -Namespace "dwp-base" `
+    -PodPrefix "base-mt-util-d" `
+    -Sequential `
+    -PullType "Cached" `
+    -OutputFile "Base-mt-util-d-$(Get-Date -Format 'ddMMyy-HHmm').html" `
+    -ServiceNames @(
+        "microservice-casing-design",
+        "microservice-geological-prognosis",
+        "microservice-schematics",
+        "microservice-trajectory-3d",
+        "microservice-edmcopyservice",
+        "microservice-lithology",
+        "microservice-pna",
+        "microservice-sam-bridge",
+        "microservice-log-transfer",
+        "dsisunitservice",
+        "microservice-bpm-info",
+        "microservice-complexity-index",
+        "microservice-graphs",
+        "microservice-holesection-summary",
+        "microservice-target-summary",
+        "microservice-jutilities",
+        "microservice-kick-tolerance",
+        "microservice-offset-bha",
+        "microservice-torquedrag-rule",
+        "microservice-emissions-estimator",
+        "microservice-trajectory",
+        "microservice-geo-magnetic",
+        "microservice-bhacasegeneration",
+        "microservice-geothermal-gradient",
+        "microservice-bha-custom-selection",
+        "microservice-cementing-calculation",
+        "microservice-swabsurge-grpc-client-dwp",
+        "microservice-torquedrag-grpc-client",
+        "microservice-hydraulics-client",
+        "microservice-keda-custom-scaler",
+        "microservice-email-notification",
+        "microservice-uwi",
+        "microservice-content",
+        "microservice-anticollision-rule",
+        "microservice-attachment",
+        "microservice-onboarding",
+        "onboardingservice",
+        "microservice-dashboard-listing",
+        "microservice-email-scheduler",
+        "microservice-dashboards-copy",
+        "microservice-casingrule",
+        "microservice-compass-middleware",
+        "microservice-dwp",
+        "microservice-edm-operations",
+        "microservice-formation-tops",
+        "microservice-well-program",
+        "microservice-wellplan-middleware",
+        "dwp-webapp",
+        "microservice-blowout-data",
+        "microservice-calc-middleware",
+        "microservice-attachment-upload",
+        "microservice-image-upload",
+        "microservice-planned-survey",
+        "microservice-dashboard-generation",
+        "microservice-report-generation",
+        "microservice-wp-report-generation",
+        "microservice-holesection"
+    )
