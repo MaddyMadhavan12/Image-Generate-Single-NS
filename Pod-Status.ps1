@@ -105,7 +105,8 @@ function Test-PodNameMatch {
     param(
         [string]$PodName,
         [string]$ServiceName,
-        [string]$PodPrefix
+        [string]$PodPrefix,
+        [string[]]$AllServiceNames = @()
     )
 
     if (-not $PodName) { return $false }
@@ -113,11 +114,31 @@ function Test-PodNameMatch {
     $serviceMatch = $PodName -match [regex]::Escape($ServiceName)
     if (-not $serviceMatch) { return $false }
 
-    if ([string]::IsNullOrWhiteSpace($PodPrefix)) {
-        return $true
+    if (-not [string]::IsNullOrWhiteSpace($PodPrefix)) {
+        if ($PodName -notmatch [regex]::Escape($PodPrefix)) { return $false }
     }
 
-    return ($PodName -match [regex]::Escape($PodPrefix))
+    # Disambiguate service names where one is a literal substring of another
+    # in the SAME benchmark run, e.g. "microservice-attachment" vs
+    # "microservice-attachment-upload", or "microservice-holesection" vs
+    # "microservice-holesection-summary". A plain substring match would let
+    # "microservice-attachment" wrongly claim the pod that actually belongs
+    # to "microservice-attachment-upload".
+    #
+    # We don't try to guess at Kubernetes hash-suffix patterns (that breaks
+    # on real pod names, e.g. a trailing "-client-<hash>" segment). Instead we
+    # use the one piece of information we actually have: if another service
+    # name in THIS run is a longer extension of this one (ServiceName +
+    # "-something") and it ALSO matches this pod, the pod belongs to that
+    # longer, more specific service instead.
+    foreach ($other in $AllServiceNames) {
+        if ($other -eq $ServiceName) { continue }
+        if ($other.Length -le $ServiceName.Length) { continue }
+        if ($other -notmatch ("^" + [regex]::Escape($ServiceName) + "-")) { continue }
+        if ($PodName -match [regex]::Escape($other)) { return $false }
+    }
+
+    return $true
 }
 
 function Get-PodLifecycleFromEvents {
@@ -291,7 +312,8 @@ function Find-RunningPodsForService {
         [string]$ServiceName,
         [string]$PodPrefix,
         [string]$Namespace,
-        [string]$KubeConfig
+        [string]$KubeConfig,
+        [string[]]$AllServiceNames = @()
     )
 
     $allPodsOutput = @(kubectl get pods -n $Namespace 2>&1 |
@@ -312,7 +334,7 @@ function Find-RunningPodsForService {
 
     # 1) Match by service name only, or service + branch prefix when provided
     $pods = @($podNames | Where-Object {
-        Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix
+        Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames
     })
     if ($pods.Count -gt 0) { return $pods }
 
@@ -325,7 +347,7 @@ function Find-RunningPodsForService {
                        Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] })
         if ($labelPods.Count -gt 0) {
             $labelMatch = @($labelPods | Where-Object {
-                Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix
+                Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames
             })
             if ($labelMatch.Count -gt 0) { return $labelMatch }
         }
@@ -348,7 +370,8 @@ function Wait-ForNewPodReady {
         [string[]]$BeforePods,
         [string]$Namespace,
         [string]$KubeConfig,
-        [int]$TimeoutSeconds
+        [int]$TimeoutSeconds,
+        [string[]]$AllServiceNames = @()
     )
 
     $waited  = 0
@@ -361,7 +384,7 @@ function Wait-ForNewPodReady {
 
         # Find pods matching service and optional branch prefix that weren't there before.
         $candidates = @($allCurrent | Where-Object {
-            (Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix) -and ($BeforePods -notcontains $_)
+            (Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames) -and ($BeforePods -notcontains $_)
         })
 
         if ($candidates.Count -gt 0) {
@@ -438,7 +461,7 @@ function Wait-ForNewPodReady {
 
 Write-Host ""
 Write-Host "=====================================================================================================" -ForegroundColor Cyan
-Write-Host "                        POD BENCHMARK  -  DWP-BASE" -ForegroundColor Cyan
+Write-Host "                        POD BENCHMARK" -ForegroundColor Cyan
 Write-Host "=====================================================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Namespace  : $Namespace" -ForegroundColor White
@@ -496,7 +519,7 @@ foreach ($serviceName in $ServiceNames) {
     Write-Host ""
 
     # 1) Find existing running pods
-    $existingPods = @(Find-RunningPodsForService -ServiceName $serviceName -PodPrefix $PodPrefix -Namespace $Namespace -KubeConfig $KubeConfig)
+    $existingPods = @(Find-RunningPodsForService -ServiceName $serviceName -PodPrefix $PodPrefix -Namespace $Namespace -KubeConfig $KubeConfig -AllServiceNames $ServiceNames)
 
     if (-not $existingPods -or $existingPods.Count -eq 0) {
         Write-Host "    No pods found for service '$serviceName' - skipping." -ForegroundColor Red
@@ -558,7 +581,7 @@ foreach ($serviceName in $ServiceNames) {
     $allPodsSnapshot = kubectl get pods -n $Namespace 2>$null |
                        Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] }
     $beforePodsForService = @($allPodsSnapshot | Where-Object {
-        Test-PodNameMatch -PodName $_ -ServiceName $serviceName -PodPrefix $PodPrefix
+        Test-PodNameMatch -PodName $_ -ServiceName $serviceName -PodPrefix $PodPrefix -AllServiceNames $ServiceNames
     })
 
     # 5) Delete the pod
@@ -579,7 +602,8 @@ foreach ($serviceName in $ServiceNames) {
         -BeforePods  $beforePodsForService `
         -Namespace   $Namespace `
         -KubeConfig  $KubeConfig `
-        -TimeoutSeconds $ReadyTimeoutSeconds
+        -TimeoutSeconds $ReadyTimeoutSeconds `
+        -AllServiceNames $ServiceNames
 
     if (-not $newPodName) {
         Write-Host "    Could not find/wait for replacement pod - recording failure." -ForegroundColor Red
@@ -893,7 +917,7 @@ $htmlContent = @"
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>[DWP-BASE] Pod Readiness Benchmark</title>
+    <title>Pod Readiness Benchmark - $Namespace</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fb; color: #1a1a2e; font-size: 13px; }
@@ -1101,7 +1125,6 @@ $htmlContent = @"
     <h1>Pod Readiness Benchmark</h1>
     <div class="sub">Measuring pod startup performance after delete &amp; recreate</div>
     <div class="meta">
-        <span><strong>Cluster:</strong> DWP-BASE</span>
         <span><strong>Namespace:</strong> $Namespace</span>
         <span><strong>Pull Type:</strong> $PullType</span>
         <span><strong>Run:</strong> $runTimestamp</span>
