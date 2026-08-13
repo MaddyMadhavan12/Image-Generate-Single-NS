@@ -9,10 +9,10 @@ param(
     [string]$KubeConfig = "",
 
     [Parameter(Mandatory=$false)]
-    [string]$Namespace = "dwp-base",
+    [string]$Namespace = "dwp",
 
     [Parameter(Mandatory=$false)]
-    [string]$OutputFile = "DWP-BASE.html",
+    [string]$OutputFile = "DWP.html",
 
     [Parameter(Mandatory=$false)]
     [int]$WaitBetweenDeletes = 10,
@@ -30,7 +30,6 @@ param(
 
 if ($KubeConfig) { $env:KUBECONFIG = $KubeConfig }
 $ClusterLabel = $Namespace.ToUpper()
-
 # ---------------------------------------------
 # Helpers
 # ---------------------------------------------
@@ -88,6 +87,11 @@ function Format-Seconds {
 
 function Get-DurationFromPulledMessage {
     param([string]$Message)
+    # kubelet's "Pulled" event message embeds the real pull duration, e.g.:
+    #   Successfully pulled image "..." in 352ms (352ms including waiting). Image size: ...
+    #   Successfully pulled image "..." in 5.943326931s
+    # This has full sub-second precision, unlike the event's firstTimestamp
+    # (which is only accurate to the whole second). Prefer this when present.
     if ($Message -match 'in\s+([\d.]+)(ms|s)\b') {
         $value = [double]$Matches[1]
         $unit  = $Matches[2]
@@ -114,6 +118,19 @@ function Test-PodNameMatch {
         if ($PodName -notmatch [regex]::Escape($PodPrefix)) { return $false }
     }
 
+    # Disambiguate service names where one is a literal substring of another
+    # in the SAME benchmark run, e.g. "microservice-attachment" vs
+    # "microservice-attachment-upload", or "microservice-holesection" vs
+    # "microservice-holesection-summary". A plain substring match would let
+    # "microservice-attachment" wrongly claim the pod that actually belongs
+    # to "microservice-attachment-upload".
+    #
+    # We don't try to guess at Kubernetes hash-suffix patterns (that breaks
+    # on real pod names, e.g. a trailing "-client-<hash>" segment). Instead we
+    # use the one piece of information we actually have: if another service
+    # name in THIS run is a longer extension of this one (ServiceName +
+    # "-something") and it ALSO matches this pod, the pod belongs to that
+    # longer, more specific service instead.
     foreach ($other in $AllServiceNames) {
         if ($other -eq $ServiceName) { continue }
         if ($other.Length -le $ServiceName.Length) { continue }
@@ -223,6 +240,7 @@ function Get-PodLifecycleFromEvents {
         }
     }
 
+    # Pod creation and ready times from pod JSON
     $podJson = kubectl get pod $PodName -n $Namespace -o json 2>$null | ConvertFrom-Json
     if ($podJson.metadata.creationTimestamp) {
         $lc.PodCreated = [DateTime]::Parse($podJson.metadata.creationTimestamp)
@@ -238,6 +256,13 @@ function Get-PodLifecycleFromEvents {
         $lc.SchedulingTime = [math]::Max(0, ($lc.Scheduled - $lc.PodCreated).TotalSeconds)
     }
 
+    # Image pull time: prefer the sub-second duration kubelet embeds in the
+    # "Pulled" event message (e.g. "in 352ms") over the difference between
+    # Pulling/Pulled *event* timestamps. Event firstTimestamp is only accurate
+    # to the whole second, so any pull under ~1s (very common) rounds down to
+    # exactly 0s via subtraction and becomes visually indistinguishable from a
+    # truly cached ("already present on machine") pull. The message text does
+    # not suffer from that rounding, so it's a strictly better source when present.
     if ($null -ne $lc.ImagePullTimeFromMsg) {
         $lc.ImagePullTime = $lc.ImagePullTimeFromMsg
     } elseif ($lc.PullingStarted -and $lc.ImagePulled) {
@@ -260,6 +285,8 @@ function Get-PodLifecycleFromEvents {
         $lc.ReadinessTime = [math]::Max(0, ($lc.PodReady - $lc.ContainerStarted).TotalSeconds)
     }
 
+    # Total ready time = wall-clock PodCreated -> PodReady, taken straight from
+    # the pod's own timestamps (not derived from events, which can be sparse/delayed).
     if ($lc.PodCreated -and $lc.PodReady) {
         $lc.TotalTime = [math]::Max(0, ($lc.PodReady - $lc.PodCreated).TotalSeconds)
     } else {
@@ -268,6 +295,11 @@ function Get-PodLifecycleFromEvents {
             $lc.ContainerCreationTime + $lc.ContainerStartTime + $lc.ReadinessTime)
     }
 
+    # "Other Events" = small gaps of wall-clock time that sit between the 6 named
+    # stages above but aren't tied to one specific Kubernetes event (e.g. an event
+    # that Kubernetes didn't emit separately, or one the API server had already
+    # aged out). This time is already inside TotalTime above - it's just the
+    # portion that doesn't fit neatly into one of the 6 named stages.
     $namedStages = $lc.SchedulingTime + $lc.ImagePullTime + $lc.IstioImagePullTime +
                    $lc.ContainerCreationTime + $lc.ContainerStartTime + $lc.ReadinessTime
     $lc.OtherEventsTime = [math]::Max(0, $lc.TotalTime - $namedStages)
@@ -288,6 +320,7 @@ function Find-RunningPodsForService {
                        Where-Object { $_ -notmatch '^E\d{4}|^W\d{4}|^I\d{4}' })
     $pods = @()
 
+    # Detect kubectl errors - no NAME header means genuine failure
     if (-not ($allPodsOutput | Where-Object { $_ -match '^NAME\s' })) {
         Write-Host "      [DEBUG] kubectl get pods returned no usable output. Raw response:" -ForegroundColor DarkYellow
         $allPodsOutput | Select-Object -First 5 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkYellow }
@@ -299,11 +332,13 @@ function Find-RunningPodsForService {
                   Where-Object { $_.Trim() -ne '' } |
                   ForEach-Object { $_.ToString().Split()[0] })
 
+    # 1) Match by service name only, or service + branch prefix when provided
     $pods = @($podNames | Where-Object {
         Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames
     })
     if ($pods.Count -gt 0) { return $pods }
 
+    # 2) Deployment label fallback
     $deploys = kubectl get deployments -n $Namespace 2>$null |
                Select-String -Pattern $ServiceName -CaseSensitive:$false
     foreach ($d in $deploys) {
@@ -318,6 +353,7 @@ function Find-RunningPodsForService {
         }
     }
 
+    # Debug: show all pod names so user can spot a naming mismatch
     $prefixInfo = if ([string]::IsNullOrWhiteSpace($PodPrefix)) { "" } else { " with prefix '$PodPrefix'" }
     Write-Host "      [DEBUG] No match for '$ServiceName'$prefixInfo. Running pods in namespace '$Namespace':" -ForegroundColor DarkYellow
     $allPodsOutput | Select-Object -Skip 1 | Select-Object -First 20 | ForEach-Object {
@@ -346,6 +382,7 @@ function Wait-ForNewPodReady {
         $allCurrent = @(kubectl get pods -n $Namespace 2>$null |
                         Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] })
 
+        # Find pods matching service and optional branch prefix that weren't there before.
         $candidates = @($allCurrent | Where-Object {
             (Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames) -and ($BeforePods -notcontains $_)
         })
@@ -370,6 +407,10 @@ function Wait-ForNewPodReady {
         return $null
     }
 
+    # Wait for Ready - use JSON output instead of jsonpath.
+    # jsonpath filters with embedded double-quotes (e.g. @.type=="Ready") are unreliable
+    # on Windows PowerShell because of how the OS reparses quoted args passed to kubectl.exe,
+    # so we parse the full pod JSON instead, which is exactly what the rest of this script does.
     $waited = 0
     $lastHeartbeat = 0
     while ($waited -lt $TimeoutSeconds) {
@@ -390,6 +431,7 @@ function Wait-ForNewPodReady {
                 return $null
             }
 
+            # Surface container-level waiting reasons (e.g. ImagePullBackOff, CrashLoopBackOff)
             $badContainer = $podJson.status.containerStatuses |
                 Where-Object { $_.state.waiting -and $_.state.waiting.reason -match 'BackOff|Error|Invalid' } |
                 Select-Object -First 1
@@ -437,6 +479,7 @@ Write-Host ""
 Write-Host "  Preflight: checking cluster connectivity..." -ForegroundColor Gray
 
 $preflightOut = kubectl get pods -n $Namespace 2>&1
+# Filter to only stdout lines (pod table rows), ignoring kubectl background warning logs
 $podTableLines = @($preflightOut | Where-Object { $_ -notmatch '^E\d{4}|^W\d{4}|^I\d{4}' })
 $hasHeader = $podTableLines | Where-Object { $_ -match '^NAME\s' }
 
@@ -475,6 +518,7 @@ foreach ($serviceName in $ServiceNames) {
     Write-Host "  Service: $serviceName" -ForegroundColor Yellow
     Write-Host ""
 
+    # 1) Find existing running pods
     $existingPods = @(Find-RunningPodsForService -ServiceName $serviceName -PodPrefix $PodPrefix -Namespace $Namespace -KubeConfig $KubeConfig -AllServiceNames $ServiceNames)
 
     if (-not $existingPods -or $existingPods.Count -eq 0) {
@@ -509,6 +553,7 @@ foreach ($serviceName in $ServiceNames) {
     $podToDelete = $existingPods[0]
     Write-Host "    Found pod : $podToDelete" -ForegroundColor Gray
 
+    # 2) Get pod metadata before delete (for the report)
     $beforeJson = kubectl get pod $podToDelete -n $Namespace -o json 2>$null | ConvertFrom-Json
 
     $imageName    = "N/A"
@@ -526,17 +571,20 @@ foreach ($serviceName in $ServiceNames) {
         $nodeName = if ($beforeJson.spec.nodeName) { $beforeJson.spec.nodeName } else { "N/A" }
     }
 
+    # 3) Patch imagePullPolicy on the deployment to control cached vs fresh pull
     $kubePullPolicy = if ($PullType -eq 'Fresh') { 'Always' } else { 'IfNotPresent' }
     Write-Host "    Setting imagePullPolicy to '$kubePullPolicy' ($PullType pull)..." -ForegroundColor Gray
     $patched = Set-DeploymentImagePullPolicy -PodName $podToDelete -Namespace $Namespace -Policy $kubePullPolicy
-    if ($patched) { Start-Sleep -Seconds 3 }
+    if ($patched) { Start-Sleep -Seconds 3 }   # brief settle time after patch
 
+    # 4) Snapshot all current pods for this service (to detect the brand-new one later)
     $allPodsSnapshot = kubectl get pods -n $Namespace 2>$null |
                        Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] }
     $beforePodsForService = @($allPodsSnapshot | Where-Object {
         Test-PodNameMatch -PodName $_ -ServiceName $serviceName -PodPrefix $PodPrefix -AllServiceNames $ServiceNames
     })
 
+    # 5) Delete the pod
     Write-Host "    Deleting pod..." -ForegroundColor Yellow
     $deleteTime = Get-Date
     kubectl delete pod $podToDelete -n $Namespace --wait=false 2>&1 | Out-Null
@@ -546,6 +594,7 @@ foreach ($serviceName in $ServiceNames) {
         Start-Sleep -Seconds $WaitBetweenDeletes
     }
 
+    # 6) Wait for replacement pod to appear and become ready
     Write-Host "    Waiting for replacement pod..." -ForegroundColor Gray
     $newPodName = Wait-ForNewPodReady `
         -ServiceName $serviceName `
@@ -585,6 +634,7 @@ foreach ($serviceName in $ServiceNames) {
         continue
     }
 
+    # 7) Collect lifecycle timing
     Write-Host "    Collecting lifecycle metrics..." -ForegroundColor Gray
     $lc = Get-PodLifecycleFromEvents -PodName $newPodName -Namespace $Namespace -KubeConfig $KubeConfig
 
@@ -678,10 +728,15 @@ function HtmlEscape {
 }
 Add-Type -AssemblyName System.Web
 
+# -- Summary table rows ------------------------------------------
 $tableRows = ""
 foreach ($r in $results) {
     $statusClass = if ($r.Status -eq "Success") { "status-success" } else { "status-failed" }
 
+    # Image Pull display is based on ACTUAL detected cache state for this run
+    # (from the "already present on machine" Kubernetes event), not the requested
+    # -PullType. Cached -> just the "Cached" badge. Not cached -> the measured
+    # pull duration plus a "Not Cached" badge.
     $imgPullDisplay = if ($r.ImageCached) {
         '<span class="badge cached">Cached</span>'
     } elseif ($r.ImagePullTime -gt 0) {
@@ -724,6 +779,7 @@ foreach ($r in $results) {
 "@
 }
 
+# -- Lifecycle stage table rows -----------------------------------
 function Get-StageClass {
     param([double]$Seconds, [double]$Avg)
     if ($Seconds -eq 0)              { return "stage-zero" }
@@ -732,6 +788,7 @@ function Get-StageClass {
     return "stage-ok"
 }
 
+# Per-stage averages (success only)
 $successOnly = @($results | Where-Object { $_.Status -eq "Success" })
 $avgSched  = if ($successOnly.Count) { ($successOnly | Measure-Object SchedulingTime        -Average).Average } else { 0 }
 $avgImgPull= if ($successOnly.Count) { ($successOnly | Measure-Object ImagePullTime         -Average).Average } else { 0 }
@@ -749,6 +806,8 @@ foreach ($r in $results) {
     $rowIndex++
     $rowId = "evt-$runId-$rowIndex"
 
+    # Badge next to the service name reflects the ACTUAL detected cache state
+    # for this run (not the requested -PullType).
     $cachedBadge = if ($r.ImageCached) { '<span class="badge cached">Cached</span>' } else { '<span class="badge fresh">Not Cached</span>' }
     $failedRow   = if ($r.Status -ne "Success") { ' class="failed-row"' } else { "" }
 
@@ -765,6 +824,7 @@ foreach ($r in $results) {
         else                                 { $totalClass = "time-slow"   }
     }
 
+    # Bar widths (% of total, capped for display)
     $total = [math]::Max($r.TotalTimeToReady, 1)
     function PctBar { param([double]$v, [double]$t, [string]$cls)
         $w = [math]::Min([math]::Round($v / $t * 100), 100)
@@ -835,6 +895,7 @@ $evtRows
     }
 }
 
+# Average footer row
 $lifecycleRows += @"
         <tr class="avg-row">
             <td class="svc-name">Avg Average</td>
@@ -1064,6 +1125,7 @@ $htmlContent = @"
     <h1>Pod Readiness Benchmark</h1>
     <div class="sub">Measuring pod startup performance after delete &amp; recreate</div>
     <div class="meta">
+        <span><strong>Cluster:</strong> $ClusterLabel</span>
         <span><strong>Namespace:</strong> $Namespace</span>
         <span><strong>Pull Type:</strong> $PullType</span>
         <span><strong>Run:</strong> $runTimestamp</span>
