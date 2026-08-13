@@ -577,7 +577,7 @@ foreach ($serviceName in $ServiceNames) {
     $lc = Get-PodLifecycleFromEvents -PodName $newPodName -Namespace $Namespace -KubeConfig $KubeConfig
 
     Write-Host "      Scheduling      : $(Format-Seconds $lc.SchedulingTime)"        -ForegroundColor DarkCyan
-    Write-Host "      Image Pull      : $(Format-Seconds $lc.ImagePullTime) $(if ($lc.ImageCached) { '(cached)' })" -ForegroundColor DarkCyan
+    Write-Host "      Image Pull      : $(Format-Seconds $lc.ImagePullTime) $(if ($lc.ImageCached) { '(cached)' } else { '(not cached)' })" -ForegroundColor DarkCyan
     Write-Host "      Istio Pull      : $(Format-Seconds $lc.IstioImagePullTime)"    -ForegroundColor DarkCyan
     Write-Host "      Container Create: $(Format-Seconds $lc.ContainerCreationTime)" -ForegroundColor DarkCyan
     Write-Host "      Container Start : $(Format-Seconds $lc.ContainerStartTime)"    -ForegroundColor DarkCyan
@@ -670,8 +670,18 @@ Add-Type -AssemblyName System.Web
 $tableRows = ""
 foreach ($r in $results) {
     $statusClass = if ($r.Status -eq "Success") { "status-success" } else { "status-failed" }
-    $pullLabel   = if ($r.RequestedPullType) { $r.RequestedPullType } else { if ($r.ImageCached) { 'Cached' } else { 'Fresh' } }
-    $cachedBadge = if ($pullLabel -eq 'Cached') { '<span class="badge cached">Cached</span>' } else { '<span class="badge fresh">Fresh</span>' }
+
+    # Image Pull display is based on ACTUAL detected cache state for this run
+    # (from the "already present on machine" Kubernetes event), not the requested
+    # -PullType. Cached -> just the "Cached" badge. Not cached -> the measured
+    # pull duration plus a "Not Cached" badge.
+    $imgPullDisplay = if ($r.ImageCached) {
+        '<span class="badge cached">Cached</span>'
+    } elseif ($r.ImagePullTime -gt 0) {
+        "$(Format-Seconds $r.ImagePullTime) " + '<span class="badge fresh">Not Cached</span>'
+    } else {
+        '<span class="badge fresh">Not Cached</span>'
+    }
 
     $deletedAtStr    = if ($r.DeletedAt)     { $r.DeletedAt.ToString("HH:mm:ss")     } else { "-" }
     $podCreatedAtStr = if ($r.PodCreatedAt)  { $r.PodCreatedAt.ToString("HH:mm:ss")  } else { "-" }
@@ -694,7 +704,7 @@ foreach ($r in $results) {
             <td>$podCreatedAtStr</td>
             <td>$podReadyAtStr</td>
             <td>$(Format-Seconds $r.SchedulingTime)</td>
-            <td>$(Format-Seconds $r.ImagePullTime) $cachedBadge</td>
+            <td>$imgPullDisplay</td>
             <td>$(Format-Seconds $r.IstioImagePullTime)</td>
             <td>$(Format-Seconds $r.ContainerCreationTime)</td>
             <td>$(Format-Seconds $r.ContainerStartTime)</td>
@@ -734,8 +744,9 @@ foreach ($r in $results) {
     $rowIndex++
     $rowId = "evt-$runId-$rowIndex"
 
-    $pullLabel   = if ($r.RequestedPullType) { $r.RequestedPullType } else { if ($r.ImageCached) { 'Cached' } else { 'Fresh' } }
-    $cachedBadge = if ($pullLabel -eq 'Cached') { '<span class="badge cached">Cached</span>' } else { '<span class="badge fresh">Fresh</span>' }
+    # Badge next to the service name reflects the ACTUAL detected cache state
+    # for this run (not the requested -PullType).
+    $cachedBadge = if ($r.ImageCached) { '<span class="badge cached">Cached</span>' } else { '<span class="badge fresh">Not Cached</span>' }
     $failedRow   = if ($r.Status -ne "Success") { ' class="failed-row"' } else { "" }
 
     $scSched  = Get-StageClass $r.SchedulingTime        $avgSched
@@ -1064,6 +1075,13 @@ $htmlContent = @"
     <strong>Note on run-to-run variance:</strong> readiness times for the same service can legitimately differ between runs.
     Common causes include node-level image cache state, scheduler/node placement (a pod landing on a busy or newly-scaled
     node takes longer), API server / etcd load when many events fire close together, and cluster autoscaler activity.
+</div>
+
+<div class="notice">
+    <strong>Cached vs Not Cached:</strong> this is determined from the pod's actual Kubernetes events for this run, not from
+    the requested Pull Type. If the node already had the image, kubelet emits "already present on machine" and the row shows
+    <strong>Cached</strong> with no pull time. If a real pull happened, the row shows the measured pull duration (e.g. 16s)
+    plus a <strong>Not Cached</strong> label.
 </div>
 
 <div class="notice">
