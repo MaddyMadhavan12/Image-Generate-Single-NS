@@ -29,7 +29,7 @@ param(
 )
 
 if ($KubeConfig) { $env:KUBECONFIG = $KubeConfig }
-
+$ClusterLabel = $Namespace.ToUpper()
 # ---------------------------------------------
 # Helpers
 # ---------------------------------------------
@@ -85,11 +85,28 @@ function Format-Seconds {
     return $r.Trim()
 }
 
+function Get-DurationFromPulledMessage {
+    param([string]$Message)
+    # kubelet's "Pulled" event message embeds the real pull duration, e.g.:
+    #   Successfully pulled image "..." in 352ms (352ms including waiting). Image size: ...
+    #   Successfully pulled image "..." in 5.943326931s
+    # This has full sub-second precision, unlike the event's firstTimestamp
+    # (which is only accurate to the whole second). Prefer this when present.
+    if ($Message -match 'in\s+([\d.]+)(ms|s)\b') {
+        $value = [double]$Matches[1]
+        $unit  = $Matches[2]
+        if ($unit -eq 'ms') { return $value / 1000.0 }
+        return $value
+    }
+    return $null
+}
+
 function Test-PodNameMatch {
     param(
         [string]$PodName,
         [string]$ServiceName,
-        [string]$PodPrefix
+        [string]$PodPrefix,
+        [string[]]$AllServiceNames = @()
     )
 
     if (-not $PodName) { return $false }
@@ -97,11 +114,31 @@ function Test-PodNameMatch {
     $serviceMatch = $PodName -match [regex]::Escape($ServiceName)
     if (-not $serviceMatch) { return $false }
 
-    if ([string]::IsNullOrWhiteSpace($PodPrefix)) {
-        return $true
+    if (-not [string]::IsNullOrWhiteSpace($PodPrefix)) {
+        if ($PodName -notmatch [regex]::Escape($PodPrefix)) { return $false }
     }
 
-    return ($PodName -match [regex]::Escape($PodPrefix))
+    # Disambiguate service names where one is a literal substring of another
+    # in the SAME benchmark run, e.g. "microservice-attachment" vs
+    # "microservice-attachment-upload", or "microservice-holesection" vs
+    # "microservice-holesection-summary". A plain substring match would let
+    # "microservice-attachment" wrongly claim the pod that actually belongs
+    # to "microservice-attachment-upload".
+    #
+    # We don't try to guess at Kubernetes hash-suffix patterns (that breaks
+    # on real pod names, e.g. a trailing "-client-<hash>" segment). Instead we
+    # use the one piece of information we actually have: if another service
+    # name in THIS run is a longer extension of this one (ServiceName +
+    # "-something") and it ALSO matches this pod, the pod belongs to that
+    # longer, more specific service instead.
+    foreach ($other in $AllServiceNames) {
+        if ($other -eq $ServiceName) { continue }
+        if ($other.Length -le $ServiceName.Length) { continue }
+        if ($other -notmatch ("^" + [regex]::Escape($ServiceName) + "-")) { continue }
+        if ($PodName -match [regex]::Escape($other)) { return $false }
+    }
+
+    return $true
 }
 
 function Get-PodLifecycleFromEvents {
@@ -126,13 +163,15 @@ function Get-PodLifecycleFromEvents {
         ContainerStarted      = $null
         PodReady              = $null
         ImageCached           = $false
+        ImagePullTimeFromMsg  = $null
+        IstioImagePullTimeFromMsg = $null
         SchedulingTime        = 0
         ImagePullTime         = 0
         IstioImagePullTime    = 0
         ContainerCreationTime = 0
         ContainerStartTime    = 0
         ReadinessTime         = 0
-        UnaccountedTime       = 0
+        OtherEventsTime       = 0
         TotalTime             = 0
         RawEvents             = @()
     }
@@ -175,9 +214,15 @@ function Get-PodLifecycleFromEvents {
                         }
                     } else {
                         if ($message -match "istio") {
-                            if (-not $lc.IstioPulled) { $lc.IstioPulled = $ts }
+                            if (-not $lc.IstioPulled) {
+                                $lc.IstioPulled = $ts
+                                if (-not $lc.IstioImagePullTimeFromMsg) { $lc.IstioImagePullTimeFromMsg = Get-DurationFromPulledMessage $message }
+                            }
                         } else {
-                            if (-not $lc.ImagePulled) { $lc.ImagePulled = $ts }
+                            if (-not $lc.ImagePulled) {
+                                $lc.ImagePulled = $ts
+                                if (-not $lc.ImagePullTimeFromMsg) { $lc.ImagePullTimeFromMsg = Get-DurationFromPulledMessage $message }
+                            }
                         }
                     }
                 }
@@ -210,12 +255,26 @@ function Get-PodLifecycleFromEvents {
     if ($lc.PodCreated -and $lc.Scheduled) {
         $lc.SchedulingTime = [math]::Max(0, ($lc.Scheduled - $lc.PodCreated).TotalSeconds)
     }
-    if ($lc.PullingStarted -and $lc.ImagePulled) {
+
+    # Image pull time: prefer the sub-second duration kubelet embeds in the
+    # "Pulled" event message (e.g. "in 352ms") over the difference between
+    # Pulling/Pulled *event* timestamps. Event firstTimestamp is only accurate
+    # to the whole second, so any pull under ~1s (very common) rounds down to
+    # exactly 0s via subtraction and becomes visually indistinguishable from a
+    # truly cached ("already present on machine") pull. The message text does
+    # not suffer from that rounding, so it's a strictly better source when present.
+    if ($null -ne $lc.ImagePullTimeFromMsg) {
+        $lc.ImagePullTime = $lc.ImagePullTimeFromMsg
+    } elseif ($lc.PullingStarted -and $lc.ImagePulled) {
         $lc.ImagePullTime = [math]::Max(0, ($lc.ImagePulled - $lc.PullingStarted).TotalSeconds)
     }
-    if ($lc.IstioPullingStarted -and $lc.IstioPulled) {
+
+    if ($null -ne $lc.IstioImagePullTimeFromMsg) {
+        $lc.IstioImagePullTime = $lc.IstioImagePullTimeFromMsg
+    } elseif ($lc.IstioPullingStarted -and $lc.IstioPulled) {
         $lc.IstioImagePullTime = [math]::Max(0, ($lc.IstioPulled - $lc.IstioPullingStarted).TotalSeconds)
     }
+
     if ($lc.ImagePulled -and $lc.ContainerCreated) {
         $lc.ContainerCreationTime = [math]::Max(0, ($lc.ContainerCreated - $lc.ImagePulled).TotalSeconds)
     }
@@ -226,14 +285,8 @@ function Get-PodLifecycleFromEvents {
         $lc.ReadinessTime = [math]::Max(0, ($lc.PodReady - $lc.ContainerStarted).TotalSeconds)
     }
 
-    # The REAL total is always wall-clock PodCreated -> PodReady, taken straight from
+    # Total ready time = wall-clock PodCreated -> PodReady, taken straight from
     # the pod's own timestamps (not derived from events, which can be sparse/delayed).
-    # We then reconcile that against the sum of the individual stages above and expose
-    # the gap explicitly as "Unaccounted" instead of silently dropping it. Event-based
-    # stages (Scheduling/Pull/Create/Start/Readiness) only capture the interval BETWEEN
-    # two specific events; any interval where an event was missing, throttled, or GC'd
-    # by the API server (Kubernetes only retains events for ~1h by default) shows up
-    # here instead of quietly vanishing or being double counted.
     if ($lc.PodCreated -and $lc.PodReady) {
         $lc.TotalTime = [math]::Max(0, ($lc.PodReady - $lc.PodCreated).TotalSeconds)
     } else {
@@ -242,9 +295,14 @@ function Get-PodLifecycleFromEvents {
             $lc.ContainerCreationTime + $lc.ContainerStartTime + $lc.ReadinessTime)
     }
 
-    $knownStages = $lc.SchedulingTime + $lc.ImagePullTime + $lc.IstioImagePullTime +
+    # "Other Events" = small gaps of wall-clock time that sit between the 6 named
+    # stages above but aren't tied to one specific Kubernetes event (e.g. an event
+    # that Kubernetes didn't emit separately, or one the API server had already
+    # aged out). This time is already inside TotalTime above - it's just the
+    # portion that doesn't fit neatly into one of the 6 named stages.
+    $namedStages = $lc.SchedulingTime + $lc.ImagePullTime + $lc.IstioImagePullTime +
                    $lc.ContainerCreationTime + $lc.ContainerStartTime + $lc.ReadinessTime
-    $lc.UnaccountedTime = [math]::Max(0, $lc.TotalTime - $knownStages)
+    $lc.OtherEventsTime = [math]::Max(0, $lc.TotalTime - $namedStages)
 
     return $lc
 }
@@ -254,7 +312,8 @@ function Find-RunningPodsForService {
         [string]$ServiceName,
         [string]$PodPrefix,
         [string]$Namespace,
-        [string]$KubeConfig
+        [string]$KubeConfig,
+        [string[]]$AllServiceNames = @()
     )
 
     $allPodsOutput = @(kubectl get pods -n $Namespace 2>&1 |
@@ -275,7 +334,7 @@ function Find-RunningPodsForService {
 
     # 1) Match by service name only, or service + branch prefix when provided
     $pods = @($podNames | Where-Object {
-        Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix
+        Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames
     })
     if ($pods.Count -gt 0) { return $pods }
 
@@ -288,7 +347,7 @@ function Find-RunningPodsForService {
                        Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] })
         if ($labelPods.Count -gt 0) {
             $labelMatch = @($labelPods | Where-Object {
-                Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix
+                Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames
             })
             if ($labelMatch.Count -gt 0) { return $labelMatch }
         }
@@ -311,7 +370,8 @@ function Wait-ForNewPodReady {
         [string[]]$BeforePods,
         [string]$Namespace,
         [string]$KubeConfig,
-        [int]$TimeoutSeconds
+        [int]$TimeoutSeconds,
+        [string[]]$AllServiceNames = @()
     )
 
     $waited  = 0
@@ -324,7 +384,7 @@ function Wait-ForNewPodReady {
 
         # Find pods matching service and optional branch prefix that weren't there before.
         $candidates = @($allCurrent | Where-Object {
-            (Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix) -and ($BeforePods -notcontains $_)
+            (Test-PodNameMatch -PodName $_ -ServiceName $ServiceName -PodPrefix $PodPrefix -AllServiceNames $AllServiceNames) -and ($BeforePods -notcontains $_)
         })
 
         if ($candidates.Count -gt 0) {
@@ -401,7 +461,7 @@ function Wait-ForNewPodReady {
 
 Write-Host ""
 Write-Host "=====================================================================================================" -ForegroundColor Cyan
-Write-Host "                        POD BENCHMARK  -  DWP" -ForegroundColor Cyan
+Write-Host "                        POD BENCHMARK  -  $ClusterLabel" -ForegroundColor Cyan
 Write-Host "=====================================================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "  Namespace  : $Namespace" -ForegroundColor White
@@ -459,7 +519,7 @@ foreach ($serviceName in $ServiceNames) {
     Write-Host ""
 
     # 1) Find existing running pods
-    $existingPods = @(Find-RunningPodsForService -ServiceName $serviceName -PodPrefix $PodPrefix -Namespace $Namespace -KubeConfig $KubeConfig)
+    $existingPods = @(Find-RunningPodsForService -ServiceName $serviceName -PodPrefix $PodPrefix -Namespace $Namespace -KubeConfig $KubeConfig -AllServiceNames $ServiceNames)
 
     if (-not $existingPods -or $existingPods.Count -eq 0) {
         Write-Host "    No pods found for service '$serviceName' - skipping." -ForegroundColor Red
@@ -477,7 +537,7 @@ foreach ($serviceName in $ServiceNames) {
             ContainerCreationTime = 0
             ContainerStartTime    = 0
             ReadinessTime         = 0
-            UnaccountedTime       = 0
+            OtherEventsTime       = 0
             TotalTimeToReady      = 0
             ImageCached           = $false
             RequestedPullType     = $PullType
@@ -521,7 +581,7 @@ foreach ($serviceName in $ServiceNames) {
     $allPodsSnapshot = kubectl get pods -n $Namespace 2>$null |
                        Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] }
     $beforePodsForService = @($allPodsSnapshot | Where-Object {
-        Test-PodNameMatch -PodName $_ -ServiceName $serviceName -PodPrefix $PodPrefix
+        Test-PodNameMatch -PodName $_ -ServiceName $serviceName -PodPrefix $PodPrefix -AllServiceNames $ServiceNames
     })
 
     # 5) Delete the pod
@@ -542,7 +602,8 @@ foreach ($serviceName in $ServiceNames) {
         -BeforePods  $beforePodsForService `
         -Namespace   $Namespace `
         -KubeConfig  $KubeConfig `
-        -TimeoutSeconds $ReadyTimeoutSeconds
+        -TimeoutSeconds $ReadyTimeoutSeconds `
+        -AllServiceNames $ServiceNames
 
     if (-not $newPodName) {
         Write-Host "    Could not find/wait for replacement pod - recording failure." -ForegroundColor Red
@@ -560,7 +621,7 @@ foreach ($serviceName in $ServiceNames) {
             ContainerCreationTime = 0
             ContainerStartTime    = 0
             ReadinessTime         = 0
-            UnaccountedTime       = 0
+            OtherEventsTime       = 0
             TotalTimeToReady      = 0
             ImageCached           = $false
             RequestedPullType     = $PullType
@@ -578,12 +639,12 @@ foreach ($serviceName in $ServiceNames) {
     $lc = Get-PodLifecycleFromEvents -PodName $newPodName -Namespace $Namespace -KubeConfig $KubeConfig
 
     Write-Host "      Scheduling      : $(Format-Seconds $lc.SchedulingTime)"        -ForegroundColor DarkCyan
-    Write-Host "      Image Pull      : $(Format-Seconds $lc.ImagePullTime) $(if ($lc.ImageCached) { '(cached)' })" -ForegroundColor DarkCyan
+    Write-Host "      Image Pull      : $(Format-Seconds $lc.ImagePullTime) $(if ($lc.ImageCached) { '(cached)' } else { '(not cached)' })" -ForegroundColor DarkCyan
     Write-Host "      Istio Pull      : $(Format-Seconds $lc.IstioImagePullTime)"    -ForegroundColor DarkCyan
     Write-Host "      Container Create: $(Format-Seconds $lc.ContainerCreationTime)" -ForegroundColor DarkCyan
     Write-Host "      Container Start : $(Format-Seconds $lc.ContainerStartTime)"    -ForegroundColor DarkCyan
     Write-Host "      Readiness       : $(Format-Seconds $lc.ReadinessTime)"         -ForegroundColor DarkCyan
-    Write-Host "      Unaccounted     : $(Format-Seconds $lc.UnaccountedTime)"       -ForegroundColor DarkGray
+    Write-Host "      Other Events    : $(Format-Seconds $lc.OtherEventsTime)"       -ForegroundColor DarkGray
     Write-Host "      -----------------------------" -ForegroundColor DarkGray
     Write-Host "      Total Ready Time: $(Format-Seconds $lc.TotalTime)"             -ForegroundColor Green
 
@@ -601,7 +662,7 @@ foreach ($serviceName in $ServiceNames) {
         ContainerCreationTime = $lc.ContainerCreationTime
         ContainerStartTime    = $lc.ContainerStartTime
         ReadinessTime         = $lc.ReadinessTime
-        UnaccountedTime       = $lc.UnaccountedTime
+        OtherEventsTime       = $lc.OtherEventsTime
         TotalTimeToReady      = $lc.TotalTime
         ImageCached           = $lc.ImageCached
         RequestedPullType     = $PullType
@@ -627,8 +688,8 @@ Write-Host "====================================================================
 Write-Host "  SUMMARY" -ForegroundColor Cyan
 Write-Host "=====================================================================================================" -ForegroundColor Cyan
 
-$successResults = $results | Where-Object { $_.Status -eq "Success" }
-$failedResults  = $results | Where-Object { $_.Status -ne "Success" }
+$successResults = @($results | Where-Object { $_.Status -eq "Success" })
+$failedResults  = @($results | Where-Object { $_.Status -ne "Success" })
 
 foreach ($r in $results) {
     $statusColor = if ($r.Status -eq "Success") { "Green" } else { "Red" }
@@ -671,8 +732,18 @@ Add-Type -AssemblyName System.Web
 $tableRows = ""
 foreach ($r in $results) {
     $statusClass = if ($r.Status -eq "Success") { "status-success" } else { "status-failed" }
-    $pullLabel   = if ($r.RequestedPullType) { $r.RequestedPullType } else { if ($r.ImageCached) { 'Cached' } else { 'Fresh' } }
-    $cachedBadge = if ($pullLabel -eq 'Cached') { '<span class="badge cached">Cached</span>' } else { '<span class="badge fresh">Fresh</span>' }
+
+    # Image Pull display is based on ACTUAL detected cache state for this run
+    # (from the "already present on machine" Kubernetes event), not the requested
+    # -PullType. Cached -> just the "Cached" badge. Not cached -> the measured
+    # pull duration plus a "Not Cached" badge.
+    $imgPullDisplay = if ($r.ImageCached) {
+        '<span class="badge cached">Cached</span>'
+    } elseif ($r.ImagePullTime -gt 0) {
+        "$(Format-Seconds $r.ImagePullTime) " + '<span class="badge fresh">Not Cached</span>'
+    } else {
+        '<span class="badge fresh">Not Cached</span>'
+    }
 
     $deletedAtStr    = if ($r.DeletedAt)     { $r.DeletedAt.ToString("HH:mm:ss")     } else { "-" }
     $podCreatedAtStr = if ($r.PodCreatedAt)  { $r.PodCreatedAt.ToString("HH:mm:ss")  } else { "-" }
@@ -695,7 +766,7 @@ foreach ($r in $results) {
             <td>$podCreatedAtStr</td>
             <td>$podReadyAtStr</td>
             <td>$(Format-Seconds $r.SchedulingTime)</td>
-            <td>$(Format-Seconds $r.ImagePullTime) $cachedBadge</td>
+            <td>$imgPullDisplay</td>
             <td>$(Format-Seconds $r.IstioImagePullTime)</td>
             <td>$(Format-Seconds $r.ContainerCreationTime)</td>
             <td>$(Format-Seconds $r.ContainerStartTime)</td>
@@ -725,7 +796,7 @@ $avgIstio  = if ($successOnly.Count) { ($successOnly | Measure-Object IstioImage
 $avgCCr    = if ($successOnly.Count) { ($successOnly | Measure-Object ContainerCreationTime -Average).Average } else { 0 }
 $avgCSt    = if ($successOnly.Count) { ($successOnly | Measure-Object ContainerStartTime    -Average).Average } else { 0 }
 $avgReady  = if ($successOnly.Count) { ($successOnly | Measure-Object ReadinessTime         -Average).Average } else { 0 }
-$avgUnacct = if ($successOnly.Count) { ($successOnly | Measure-Object UnaccountedTime       -Average).Average } else { 0 }
+$avgOther  = if ($successOnly.Count) { ($successOnly | Measure-Object OtherEventsTime       -Average).Average } else { 0 }
 $avgTotal  = if ($successOnly.Count) { ($successOnly | Measure-Object TotalTimeToReady      -Average).Average } else { 0 }
 
 $lifecycleRows = ""
@@ -735,8 +806,9 @@ foreach ($r in $results) {
     $rowIndex++
     $rowId = "evt-$runId-$rowIndex"
 
-    $pullLabel   = if ($r.RequestedPullType) { $r.RequestedPullType } else { if ($r.ImageCached) { 'Cached' } else { 'Fresh' } }
-    $cachedBadge = if ($pullLabel -eq 'Cached') { '<span class="badge cached">Cached</span>' } else { '<span class="badge fresh">Fresh</span>' }
+    # Badge next to the service name reflects the ACTUAL detected cache state
+    # for this run (not the requested -PullType).
+    $cachedBadge = if ($r.ImageCached) { '<span class="badge cached">Cached</span>' } else { '<span class="badge fresh">Not Cached</span>' }
     $failedRow   = if ($r.Status -ne "Success") { ' class="failed-row"' } else { "" }
 
     $scSched  = Get-StageClass $r.SchedulingTime        $avgSched
@@ -752,7 +824,7 @@ foreach ($r in $results) {
         else                                 { $totalClass = "time-slow"   }
     }
 
-    # Bar widths (% of total, capped for display) - now includes Unaccounted so bars always sum to ~100%
+    # Bar widths (% of total, capped for display)
     $total = [math]::Max($r.TotalTimeToReady, 1)
     function PctBar { param([double]$v, [double]$t, [string]$cls)
         $w = [math]::Min([math]::Round($v / $t * 100), 100)
@@ -776,7 +848,7 @@ foreach ($r in $results) {
             <td class="$scCCr   stage-cell">$(Format-Seconds $r.ContainerCreationTime)</td>
             <td class="$scCSt   stage-cell">$(Format-Seconds $r.ContainerStartTime)</td>
             <td class="$scReady stage-cell">$(Format-Seconds $r.ReadinessTime)</td>
-            <td class="stage-cell stage-unaccounted" title="Wall-clock time not attributed to a specific stage (missing/GC'd events, API latency, etc.)">$(Format-Seconds $r.UnaccountedTime)</td>
+            <td class="stage-cell stage-other" title="Small bits of time between the 6 tracked steps that don't belong to any one step specifically. Already included in Total Ready Time.">$(Format-Seconds $r.OtherEventsTime)</td>
             <td class="$totalClass total-cell">$(Format-Seconds $r.TotalTimeToReady)</td>
             <td>$(PctBar $r.SchedulingTime        $total 'c-sched')</td>
             <td>$(PctBar $r.ImagePullTime         $total 'c-img')</td>
@@ -784,7 +856,7 @@ foreach ($r in $results) {
             <td>$(PctBar $r.ContainerCreationTime $total 'c-ccr')</td>
             <td>$(PctBar $r.ContainerStartTime    $total 'c-cst')</td>
             <td>$(PctBar $r.ReadinessTime         $total 'c-ready')</td>
-            <td>$(PctBar $r.UnaccountedTime       $total 'c-unacct')</td>
+            <td>$(PctBar $r.OtherEventsTime       $total 'c-other')</td>
         </tr>
 "@
 
@@ -833,7 +905,7 @@ $lifecycleRows += @"
             <td class="stage-cell">$(Format-Seconds $avgCCr)</td>
             <td class="stage-cell">$(Format-Seconds $avgCSt)</td>
             <td class="stage-cell">$(Format-Seconds $avgReady)</td>
-            <td class="stage-cell">$(Format-Seconds $avgUnacct)</td>
+            <td class="stage-cell">$(Format-Seconds $avgOther)</td>
             <td class="total-cell">$(Format-Seconds $avgTotal)</td>
             <td colspan="7"></td>
         </tr>
@@ -845,7 +917,7 @@ $htmlContent = @"
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>[DWP] Pod Readiness Benchmark</title>
+    <title>[$ClusterLabel] Pod Readiness Benchmark</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fb; color: #1a1a2e; font-size: 13px; }
@@ -973,7 +1045,7 @@ $htmlContent = @"
         .stage-fast { color: #10b981; font-weight: 700; }
         .stage-ok   { color: #374151; }
         .stage-slow { color: #ef4444; font-weight: 700; }
-        .stage-unaccounted { color: #94a3b8; font-style: italic; }
+        .stage-other { color: #94a3b8; font-style: italic; }
 
         .failed-row td { opacity: 0.4; }
         .avg-row td { background: #f0f4ff; font-weight: 700; color: #4a6cf7; border-top: 2px solid #e2e8f0; }
@@ -989,7 +1061,7 @@ $htmlContent = @"
         .c-ccr   { background: #10b981; }
         .c-cst   { background: #059669; }
         .c-ready { background: #f87171; }
-        .c-unacct{ background: #cbd5e1; }
+        .c-other { background: #cbd5e1; }
 
         /* legend */
         .legend { display: flex; flex-wrap: wrap; gap: 14px; padding: 0 40px 18px; }
@@ -1053,7 +1125,7 @@ $htmlContent = @"
     <h1>Pod Readiness Benchmark</h1>
     <div class="sub">Measuring pod startup performance after delete &amp; recreate</div>
     <div class="meta">
-        <span><strong>Cluster:</strong> DWP</span>
+        <span><strong>Cluster:</strong> $ClusterLabel</span>
         <span><strong>Namespace:</strong> $Namespace</span>
         <span><strong>Pull Type:</strong> $PullType</span>
         <span><strong>Run:</strong> $runTimestamp</span>
@@ -1065,9 +1137,20 @@ $htmlContent = @"
     <strong>Note on run-to-run variance:</strong> readiness times for the same service can legitimately differ between runs.
     Common causes include node-level image cache state, scheduler/node placement (a pod landing on a busy or newly-scaled
     node takes longer), API server / etcd load when many events fire close together, and cluster autoscaler activity.
-    The <em>Unaccounted</em> column below captures any wall-clock time that isn't attributable to a specific event-based
-    stage (e.g. a Kubernetes event that was throttled, deduplicated, or garbage-collected before it could be read - the
-    API server only retains events for about an hour by default).
+</div>
+
+<div class="notice">
+    <strong>Cached vs Not Cached:</strong> this is determined from the pod's actual Kubernetes events for this run, not from
+    the requested Pull Type. If the node already had the image, kubelet emits "already present on machine" and the row shows
+    <strong>Cached</strong> with no pull time. If a real pull happened, the row shows the measured pull duration (e.g. 16s)
+    plus a <strong>Not Cached</strong> label.
+</div>
+
+<div class="notice">
+    <strong>What is "Other Events"?</strong> Small bits of time between the 6 tracked steps (Scheduling, Image Pull, Istio Pull,
+    Container Create, Container Start, Readiness) that don't belong to any one step specifically. It's already counted in the
+    Total Ready Time shown &mdash; not extra time, not missing time, just leftover time that doesn't fit neatly into one of the
+    6 named steps.
 </div>
 
 <div class="summary-grid">
@@ -1106,7 +1189,7 @@ $htmlContent = @"
     <div class="legend-item"><div class="legend-dot c-ccr"></div>Container Create</div>
     <div class="legend-item"><div class="legend-dot c-cst"></div>Container Start</div>
     <div class="legend-item"><div class="legend-dot c-ready"></div>Readiness</div>
-    <div class="legend-item"><div class="legend-dot c-unacct"></div>Unaccounted</div>
+    <div class="legend-item"><div class="legend-dot c-other"></div>Other Events</div>
 </div>
 
 <div class="table-wrap">
@@ -1124,7 +1207,7 @@ $htmlContent = @"
                 <th class="hdr-stage" style="text-align:right">4. Ctr Create</th>
                 <th class="hdr-stage" style="text-align:right">5. Ctr Start</th>
                 <th class="hdr-stage" style="text-align:right">6. Readiness</th>
-                <th class="hdr-stage" style="text-align:right">7. Unaccounted</th>
+                <th class="hdr-stage" style="text-align:right">Other Events</th>
                 <th class="hdr-stage" style="text-align:right;border-right:none">Total Ready Time</th>
                 <th class="hdr-bar">Scheduling</th>
                 <th class="hdr-bar">Image Pull</th>
@@ -1132,7 +1215,7 @@ $htmlContent = @"
                 <th class="hdr-bar">Ctr Create</th>
                 <th class="hdr-bar">Ctr Start</th>
                 <th class="hdr-bar">Readiness</th>
-                <th class="hdr-bar">Unaccounted</th>
+                <th class="hdr-bar">Other Events</th>
             </tr>
         </thead>
         <tbody>
